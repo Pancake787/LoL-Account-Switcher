@@ -6,7 +6,11 @@ MUST NOT import gui/, config, controller, credential_store, or riot_client.
 Implements:
 - RiotAPIError: typed exception carrying .status_code
 - _handle_response: HTTP error table (200/401/403/404/429/5xx)
-- resolve_puuid: Riot-ID → PUUID via account-v1 (regional host europe)
+- PLATFORM_TO_REGIONAL: canonical platform id → regional cluster (REGION-01/02)
+- regional_host_for: endpoint-aware regional host (account-v1 SEA→asia override)
+- platform_host: platform host, defensively normalizes legacy EUW/EUNE aliases
+- validate_api_key: cheapest reliable Riot API key validation call
+- resolve_puuid: Riot-ID → PUUID via account-v1 (regional host, default europe)
 - fetch_entries: PUUID → league entries via league-v4/entries/by-puuid (2-call primary)
 - fetch_summoner_id: PUUID → encryptedSummonerId via summoner-v4 (3-call fallback step 2a)
 - fetch_entries_by_summoner: summonerId → league entries via league-v4/by-summoner (3-call fallback step 2b)
@@ -27,14 +31,26 @@ from models import QueueRank, RankInfo
 # Constants
 # ---------------------------------------------------------------------------
 
-#: Regional routing host for account-v1 (europe covers EUW + EUNE).
-REGIONAL_HOST: str = "europe.api.riotgames.com"
-
-#: Platform hosts per region for league-v4 and summoner-v4 endpoints.
-PLATFORM_HOSTS: dict[str, str] = {
-    "EUW": "euw1.api.riotgames.com",
-    "EUNE": "eun1.api.riotgames.com",
+# Source: developer.riotgames.com/api-details/match-v5 (verbatim: "The AMERICAS
+# routing value serves NA, BR, LAN and LAS. The ASIA routing value serves KR
+# and JP. The EUROPE routing value serves EUNE, EUW, ME1, TR and RU. The SEA
+# routing value serves OCE, SG2, TW2 and VN2.") +
+# github.com/RiotGames/developer-relations/issues/394 (account-v1 has no SEA
+# regional host — SEA-cluster platforms must route through ASIA for
+# account-v1 calls specifically; regional_host_for() implements this override
+# below). Do NOT "simplify" this away — it is a documented Riot exception,
+# not a bug (RESEARCH.md Open Question 2).
+PLATFORM_TO_REGIONAL: dict[str, str] = {
+    "NA1": "americas", "BR1": "americas", "LA1": "americas", "LA2": "americas",
+    "KR": "asia", "JP1": "asia",
+    "EUW1": "europe", "EUN1": "europe", "ME1": "europe", "TR1": "europe", "RU": "europe",
+    "OC1": "sea", "SG2": "sea", "TW2": "sea", "VN2": "sea",
 }
+
+#: Legacy pre-Phase-8 region strings (bare "EUW"/"EUNE", no numeral suffix)
+#: mapped to their canonical Riot platform ids. Defensive normalization only —
+#: see config._normalize_region for the actual account-data migration (D-12).
+_LEGACY_PLATFORM_ALIASES: dict[str, str] = {"EUW": "EUW1", "EUNE": "EUN1"}
 
 #: APEX tiers have no meaningful division string in the display (API returns "I" but
 #: it is meaningless — all Master+ players share the same tier).
@@ -89,9 +105,72 @@ def _handle_response(resp: requests.Response) -> None:
     raise RiotAPIError(resp.status_code, f"API-Fehler {resp.status_code}")
 
 
-def _platform_host(region: str) -> str:
-    """Resolve region string to platform host. Defaults to EUW for unknown regions."""
-    return PLATFORM_HOSTS.get(region.upper(), PLATFORM_HOSTS["EUW"])
+def regional_host_for(platform_id: str, *, endpoint: str = "default") -> str:
+    """Resolve a canonical platform id to its regional cluster host.
+
+    Args:
+        platform_id: Canonical Riot platform id (e.g. "EUW1", "OC1"). Case-insensitive.
+        endpoint: "account-v1" applies the documented SEA→ASIA override (account-v1
+            has no SEA regional host — Riot devrel guidance, GitHub issue #394).
+            Any other value (including the "default") uses the real cluster.
+
+    Returns:
+        The regional cluster host, e.g. "europe.api.riotgames.com".
+
+    Raises:
+        KeyError: if platform_id is not a recognized key of PLATFORM_TO_REGIONAL
+            (T-08-01: whitelist enforcement — never silently default).
+    """
+    cluster = PLATFORM_TO_REGIONAL[platform_id.upper()]
+    if endpoint == "account-v1" and cluster == "sea":
+        cluster = "asia"  # account-v1 has no SEA regional host — documented Riot workaround
+    return f"{cluster}.api.riotgames.com"
+
+
+def platform_host(platform_id: str) -> str:
+    """Resolve a platform id to its platform host, defensively normalizing legacy aliases.
+
+    Legacy bare region strings ("EUW", "EUNE") are normalized to their canonical
+    platform ids ("EUW1", "EUN1") first, so any un-migrated caller or test still
+    resolves correctly. Any other value is lower-cased as-is — this function does
+    NOT enforce a whitelist (that happens at the controller entry points, Plan
+    08-03, per Pitfall 5); it only prevents the EUW/EUNE naming mismatch (Pitfall 2).
+    """
+    normalized = _LEGACY_PLATFORM_ALIASES.get(platform_id.upper(), platform_id.upper())
+    return f"{normalized.lower()}.api.riotgames.com"
+
+
+def validate_api_key(key: str, platform_id: str = "EUW1") -> bool:
+    """Validate a candidate Riot API key via the cheapest reliable call.
+
+    GET /lol/status/v4/platform-data requires zero identifying parameters
+    (no Riot ID, no PUUID) and gives a clean binary valid/invalid signal —
+    unlike account-v1, which needs a real Riot ID the user may not have
+    entered yet (D-03, RESEARCH.md Pattern 3).
+
+    Args:
+        key: Candidate Riot personal API key — sent ONLY in the X-Riot-Token
+            header, never logged or embedded in any raised message (T-08-02).
+        platform_id: Any canonical platform id works; default "EUW1" is
+            arbitrary (status-v4 is platform-agnostic for this purpose).
+
+    Returns:
+        True if the key is valid (HTTP 200), False if invalid/expired (401/403).
+
+    Raises:
+        RiotAPIError: on any other non-200 response (e.g. 429/5xx).
+    """
+    host = platform_host(platform_id)
+    resp = requests.get(
+        f"https://{host}/lol/status/v4/platform-data",
+        headers={"X-Riot-Token": key},
+        timeout=10,
+    )
+    if resp.status_code == 200:
+        return True
+    if resp.status_code in (401, 403):
+        return False
+    raise RiotAPIError(resp.status_code, f"API-Fehler {resp.status_code}")
 
 
 # ---------------------------------------------------------------------------
@@ -99,13 +178,20 @@ def _platform_host(region: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def resolve_puuid(game_name: str, tag_line: str, api_key: str) -> str:
-    """Step 1: Riot-ID → PUUID via account-v1 by-riot-id (regional host 'europe').
+def resolve_puuid(
+    game_name: str, tag_line: str, api_key: str, platform_id: str = "EUW1"
+) -> str:
+    """Step 1: Riot-ID → PUUID via account-v1 by-riot-id.
 
     Args:
         game_name: The gameName portion of the Riot-ID (e.g. "Main").
         tag_line:  The tagLine portion (e.g. "EUW").
         api_key:   Riot personal API key — sent in X-Riot-Token header only.
+        platform_id: Canonical platform id used to pick the regional cluster
+            host (account-v1 endpoint-aware routing, including the SEA→asia
+            override). Default "EUW1" keeps every pre-Phase-8 caller's
+            behavior identical (europe) — threading the real region through
+            all call sites happens in Plan 08-03.
 
     Returns:
         The PUUID string from the account-v1 response.
@@ -115,8 +201,9 @@ def resolve_puuid(game_name: str, tag_line: str, api_key: str) -> str:
 
     T-02-05: api_key is NOT embedded in any raised exception message.
     """
+    host = regional_host_for(platform_id, endpoint="account-v1")
     url = (
-        f"https://{REGIONAL_HOST}/riot/account/v1/accounts/by-riot-id"
+        f"https://{host}/riot/account/v1/accounts/by-riot-id"
         f"/{quote(game_name, safe='')}/{quote(tag_line, safe='')}"
     )
     resp = requests.get(url, headers={"X-Riot-Token": api_key}, timeout=10)
@@ -131,7 +218,8 @@ def fetch_entries(puuid: str, region: str, api_key: str) -> list[dict]:
 
     Args:
         puuid:   Account PUUID from resolve_puuid.
-        region:  "EUW" or "EUNE" — routes to the correct platform host.
+        region:  Canonical Riot platform id (e.g. "EUW1"); legacy "EUW"/"EUNE"
+                 are defensively normalized by platform_host().
         api_key: Riot personal API key.
 
     Raises:
@@ -139,7 +227,7 @@ def fetch_entries(puuid: str, region: str, api_key: str) -> list[dict]:
             404 indicates the by-puuid endpoint may not be live on this region
             (Assumption A1 in RESEARCH.md) — caller should fall back to 3-call chain.
     """
-    host = _platform_host(region)
+    host = platform_host(region)
     url = f"https://{host}/lol/league/v4/entries/by-puuid/{quote(puuid, safe='')}"
     resp = requests.get(url, headers={"X-Riot-Token": api_key}, timeout=10)
     _handle_response(resp)
@@ -160,7 +248,8 @@ def fetch_summoner_id(puuid: str, region: str, api_key: str) -> str:
 
     Args:
         puuid:   Account PUUID.
-        region:  "EUW" or "EUNE".
+        region:  Canonical Riot platform id (e.g. "EUW1"); legacy "EUW"/"EUNE"
+                 are defensively normalized by platform_host().
         api_key: Riot personal API key.
 
     Returns:
@@ -170,7 +259,7 @@ def fetch_summoner_id(puuid: str, region: str, api_key: str) -> str:
         RiotAPIError: on any non-200 HTTP response.
         ValueError: if the 'id' field is absent from the response (Aug-2025 bug).
     """
-    host = _platform_host(region)
+    host = platform_host(region)
     url = f"https://{host}/lol/summoner/v4/summoners/by-puuid/{quote(puuid, safe='')}"
     resp = requests.get(url, headers={"X-Riot-Token": api_key}, timeout=10)
     _handle_response(resp)
@@ -190,7 +279,8 @@ def fetch_entries_by_summoner(summoner_id: str, region: str, api_key: str) -> li
 
     Args:
         summoner_id: Encrypted summoner ID from fetch_summoner_id.
-        region:      "EUW" or "EUNE".
+        region:      Canonical Riot platform id (e.g. "EUW1"); legacy "EUW"/"EUNE"
+                     are defensively normalized by platform_host().
         api_key:     Riot personal API key.
 
     Returns:
@@ -199,7 +289,7 @@ def fetch_entries_by_summoner(summoner_id: str, region: str, api_key: str) -> li
     Raises:
         RiotAPIError: on any non-200 HTTP response.
     """
-    host = _platform_host(region)
+    host = platform_host(region)
     url = f"https://{host}/lol/league/v4/entries/by-summoner/{quote(summoner_id, safe='')}"
     resp = requests.get(url, headers={"X-Riot-Token": api_key}, timeout=10)
     _handle_response(resp)
