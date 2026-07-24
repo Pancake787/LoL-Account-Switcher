@@ -969,9 +969,8 @@ class TestControllerSwitchAccount(unittest.TestCase):
                 target.has_snapshot = True
 
                 # Verify controller source does not read lockfile or RiotClientSettings
-                src = open(
-                    pathlib.Path(__file__).parent / "controller.py", encoding="utf-8"
-                ).read()
+                # (controller_module's own __file__ is authoritative regardless of test location)
+                src = open(controller_module.__file__, encoding="utf-8").read()
                 self.assertNotIn("lockfile", src)
                 self.assertNotIn("RiotClientSettings.yaml", src)
             finally:

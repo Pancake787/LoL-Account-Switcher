@@ -2,6 +2,8 @@
 
 [English](README.md) · [Deutsch](README.de.md)
 
+[![CI](https://github.com/Pancake787/LoL-Account-Switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/Pancake787/LoL-Account-Switcher/actions/workflows/ci.yml)
+
 A lightweight Windows desktop app that lets you switch between 2-3 League of
 Legends accounts with a single click — no re-entering passwords, no manual
 Riot Client juggling. Each account card shows the current rank (Solo/Duo +

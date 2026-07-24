@@ -14,7 +14,8 @@ class TestModuleBoundary(unittest.TestCase):
 
     def test_no_forbidden_imports_in_source(self):
         """Module source must not import controller/gui/credential_store."""
-        path = os.path.join(os.path.dirname(__file__), "status_poller.py")
+        # status_poller's own __file__ is authoritative regardless of test location
+        path = status_poller.__file__
         with open(path, encoding="utf-8") as fh:
             src = fh.read()
         tree = ast.parse(src)

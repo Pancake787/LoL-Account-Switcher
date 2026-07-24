@@ -6,6 +6,26 @@ setup, running tests, building a release, and the pull-request workflow.
 Please also read our [Code of Conduct](CODE_OF_CONDUCT.md) — participation in
 this project means agreeing to abide by it.
 
+## Repository Workflow (public repo is the primary work repo)
+
+`https://github.com/Pancake787/LoL-Account-Switcher` is the **primary work
+repo** — all development happens against it directly. The maintainer pushes
+branches straight to this repo; external contributors fork and open pull
+requests (see "Pull Request Workflow" below).
+
+A few paths are **local-only planning/agent artifacts** and are intentionally
+gitignored — they never appear in this repository: `.planning/`, `CLAUDE.md`,
+`.claude/`, `mockups/`, and `dev_harness_*.py`. Don't commit them, and don't
+be surprised that maintainer commit messages occasionally reference planning
+documents you can't see.
+
+Before pushing anything: `py -m pytest` and `pre-commit run --all-files` must
+be green locally, and CI (GitHub Actions) must pass on the branch.
+
+The maintainer's previous private remote (a homelab Git server) is currently
+offline; it may later be re-added as an optional backup remote, but the
+public repo remains the source of truth either way.
+
 ## Development Setup
 
 1. **Install Python 3.12** from [python.org](https://www.python.org/downloads/)
@@ -138,5 +158,7 @@ false positive, do not disable it — open an issue instead so the
 - `gui/` — pywebview shell, HTML/CSS/JS front end, and the JS↔Python bridge.
 - `stream-deck-plugin/` — the optional Elgato Stream Deck plugin (TypeScript).
 
-See [`CLAUDE.md`](CLAUDE.md) for deeper implementation notes (session file
-location, process kill order, keyring/PyInstaller quirks).
+Deeper implementation notes (session file location, process kill order,
+keyring/PyInstaller quirks) live in the maintainer's local-only agent notes
+and in the README's technical sections — ask in an issue if you need
+background on one of these areas.

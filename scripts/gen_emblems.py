@@ -7,14 +7,15 @@ through window.state (Pitfall 3).
 
 Stdlib only (base64, json, os) — no Pillow/requests/numpy.
 
-Re-run any time:  py gen_emblems.py
+Re-run any time:  py scripts/gen_emblems.py
 """
 import base64
 import json
 import os
 
-SRC_DIR = os.path.join(os.path.dirname(__file__), "gui", "assets", "emblems")
-OUT_FILE = os.path.join(os.path.dirname(__file__), "gui", "assets", "emblems_data.js")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR = os.path.join(REPO_ROOT, "gui", "assets", "emblems")
+OUT_FILE = os.path.join(REPO_ROOT, "gui", "assets", "emblems_data.js")
 
 TIERS = [
     "iron", "bronze", "silver", "gold", "platinum", "emerald",

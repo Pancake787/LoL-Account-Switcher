@@ -345,9 +345,8 @@ class TestCoreImportGuard(unittest.TestCase):
     def test_no_forbidden_imports_in_core(self):
         """AST-basierte Pruefung: keine verbotenen Imports auf Modulebene."""
         import ast
-        import os
-        # Finde core.py relativ zum Testverzeichnis
-        core_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "core.py")
+        # core.py's own __file__ is authoritative regardless of test location
+        core_path = core.__file__
         src = open(core_path, encoding="utf-8").read()
         tree = ast.parse(src)
         mods = (

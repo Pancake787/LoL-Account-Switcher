@@ -10,6 +10,11 @@ build/
 dist/
 *.spec.bak
 
+# Release assets (built per release, attached to GitHub Releases — never committed)
+LoLSwitcher-*-Setup.exe
+LoLSwitcher-*-win64.zip
+MicrosoftEdgeWebview2Setup.exe
+
 # OS / editor
 Thumbs.db
 .DS_Store
@@ -29,6 +34,7 @@ riot_api_key.txt
 *.yaml
 *.yml
 !.pre-commit-config.yaml
+!.github/workflows/*.yml
 
 # App data that must never be committed
 accounts.json
@@ -37,3 +43,11 @@ sessions/
 # Test fixture safety net (tests already use tmp_path/tempfile — this is defense-in-depth)
 test_fixtures/
 *.session.yaml
+
+# --- Local-only planning/agent artifacts (E1: public repo is the primary work repo) ---
+# These stay on the maintainer's machine and must never reach the public remote.
+.planning/
+/CLAUDE.md
+.claude/
+mockups/
+dev_harness_*.py

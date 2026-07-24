@@ -2,6 +2,8 @@
 
 [English](README.md) · [Deutsch](README.de.md)
 
+[![CI](https://github.com/Pancake787/LoL-Account-Switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/Pancake787/LoL-Account-Switcher/actions/workflows/ci.yml)
+
 Ein leichtgewichtiges Windows-Desktop-Tool, mit dem du mit einem Klick
 zwischen 2-3 League-of-Legends-Accounts wechseln kannst — ohne Passwörter
 erneut einzutippen und ohne den Riot Client manuell zu bedienen. Jede

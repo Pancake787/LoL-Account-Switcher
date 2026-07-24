@@ -28,6 +28,7 @@ _FORBIDDEN_MODULES = [
     "tkinter",
     "gui.webview_window",
     "gui.js_api",
+    "pystray",
 ]
 
 _CHECK_SCRIPT = """

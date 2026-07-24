@@ -3,11 +3,13 @@
 Draws the teal swap-arrow mark (matching the Stream Deck plugin icon) at 256px
 and wraps it as a PNG-compressed ICO entry (Vista+ format).
 
-Re-run any time:  py gen_app_icon.py
+Re-run any time:  py scripts/gen_app_icon.py
 """
 import os
 import struct
 import zlib
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class Canvas:
@@ -88,7 +90,7 @@ icondir = struct.pack("<HHH", 0, 1, 1)
 entry = struct.pack("<BBBBHHII", width, width, 0, 0, 1, 32, len(png), 22)
 ico = icondir + entry + png
 
-out_dir = os.path.join(os.path.dirname(__file__), "assets")
+out_dir = os.path.join(REPO_ROOT, "assets")
 os.makedirs(out_dir, exist_ok=True)
 out = os.path.join(out_dir, "icon.ico")
 with open(out, "wb") as f:
