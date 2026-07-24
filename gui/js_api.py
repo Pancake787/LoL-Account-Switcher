@@ -29,6 +29,18 @@ _EXTERNAL_URL_HOST_ALLOWLIST: frozenset[str] = frozenset(
     {"developer.riotgames.com", "github.com"}
 )
 
+#: CR-01 hardening: exact, case-insensitive origin prefixes that
+#: ``open_external_url`` accepts. This is checked on the *raw* input string
+#: BEFORE any parsing, as defense-in-depth against parser-confusion bypasses
+#: (see the docstring on ``open_external_url`` for the specific attack this
+#: closes). Deliberately narrower than the hostname allowlist above (no
+#: subdomain wildcarding) — only these two origins are ever linked to from
+#: this app today.
+_EXTERNAL_URL_ALLOWED_PREFIXES: tuple[str, ...] = (
+    "https://github.com/",
+    "https://developer.riotgames.com/",
+)
+
 
 class JsApi:
     """Thin JS-to-Python bridge.
@@ -339,8 +351,23 @@ class JsApi:
         T-08-13: only ``https://`` URLs whose host is exactly
         ``developer.riotgames.com`` or ``github.com`` (or a subdomain thereof)
         are ever passed to ``webbrowser.open``; anything else is rejected
-        without side effects. This is the ONLY validation this bridge method
-        performs (T-04-05 — no other business logic).
+        without side effects.
+
+        CR-01 hardening: component-level parsing alone (``urlsplit().hostname``)
+        is NOT trustworthy as the sole gate, because Python's ``urlsplit`` and
+        the WHATWG URL Standard used by every real browser disagree on how a
+        backslash before an ``@`` in the authority is parsed for
+        ``https``/``http`` ("special") schemes — a URL like
+        ``https://evil.com\\@github.com/x`` parses as host ``github.com`` under
+        ``urlsplit`` (passing a naive allowlist check) while a real browser
+        navigates to ``evil.com``. To close this, the raw input string is
+        checked FIRST, before any parsing: it must contain no backslash,
+        whitespace, or ``@`` character, and must start (case-insensitively)
+        with one of the exact, allowlisted origin prefixes in
+        ``_EXTERNAL_URL_ALLOWED_PREFIXES``. Only a URL that survives both the
+        raw-string check and the parsed-hostname allowlist check is ever
+        passed to ``webbrowser.open`` — and it is passed unmodified only
+        because the raw-string check already pins the origin exactly.
 
         Args:
             url: The candidate URL to open.
@@ -348,6 +375,15 @@ class JsApi:
         Returns:
             ``{"ok": True}`` if the URL was opened, ``{"ok": False}`` otherwise.
         """
+        if not isinstance(url, str):
+            return {"ok": False}
+        # Raw-string defense-in-depth gate — must run BEFORE any parsing.
+        # Rejects the backslash-before-@ trick, plain userinfo (`user@host`)
+        # tricks, and embedded whitespace/control characters outright.
+        if "\\" in url or "@" in url or any(ch.isspace() for ch in url):
+            return {"ok": False}
+        if not url.lower().startswith(_EXTERNAL_URL_ALLOWED_PREFIXES):
+            return {"ok": False}
         try:
             parts = urlsplit(url)
         except ValueError:

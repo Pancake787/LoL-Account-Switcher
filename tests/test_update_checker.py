@@ -272,7 +272,13 @@ class TestControllerUpdateCheck(unittest.TestCase):
 
     def test_newer_non_dismissed_result_sets_pill_state(self) -> None:
         """A mocked newer release (not the dismissed tag) sets update_available/
-        update_tag/update_url and pushes them to window.state."""
+        update_tag/update_url and pushes them to window.state.
+
+        CR-01: update_url is constructed server-side from the validated tag +
+        the hardcoded REPO constant — the mocked (and here intentionally
+        different) `html_url` from the release payload must NOT be trusted
+        or forwarded.
+        """
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             ctrl, patchers = self._make_controller(pathlib.Path(tmp))
@@ -283,7 +289,7 @@ class TestControllerUpdateCheck(unittest.TestCase):
                     "update_checker.check_for_update",
                     return_value={
                         "tag_name": "v2.2.0",
-                        "html_url": "https://github.com/x/releases/v2.2.0",
+                        "html_url": "https://evil.example/x",
                     },
                 ):
                     ctrl._run_update_check()
@@ -291,10 +297,89 @@ class TestControllerUpdateCheck(unittest.TestCase):
                 self.assertTrue(ctrl._update_available)
                 self.assertEqual(ctrl._update_tag, "v2.2.0")
                 self.assertEqual(
-                    ctrl._update_url, "https://github.com/x/releases/v2.2.0"
+                    ctrl._update_url,
+                    f"https://github.com/{update_checker.REPO}/releases/tag/v2.2.0",
                 )
                 self.assertTrue(ctrl._fake_window.state.update_available)
                 self.assertEqual(ctrl._fake_window.state.update_tag, "v2.2.0")
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_malformed_tag_name_is_rejected_and_pill_stays_hidden(self) -> None:
+        """CR-01: a tag_name that doesn't match the strict version-tag shape
+        (e.g. containing a URL-like payload) is rejected outright — never
+        used to construct update_url, never shown as a pill."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.dismissed_update_version = None
+                ctrl.state.update_last_checked = 0.0
+                with patch(
+                    "update_checker.check_for_update",
+                    return_value={
+                        "tag_name": "v2.2.0/../evil",
+                        "html_url": "https://github.com/x/releases/evil",
+                    },
+                ):
+                    ctrl._run_update_check()
+
+                self.assertFalse(ctrl._update_available)
+                self.assertIsNone(ctrl._update_tag)
+                self.assertIsNone(ctrl._update_url)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_disabled_mid_flight_suppresses_stale_result(self) -> None:
+        """WR-04 TOCTOU: if update_check_enabled is turned off *after*
+        start_update_check() kicked off the worker but *before* the result is
+        applied, the stale in-flight result must not resurrect the pill."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.dismissed_update_version = None
+                ctrl.state.update_last_checked = 0.0
+                ctrl.state.update_check_enabled = False
+                with patch(
+                    "update_checker.check_for_update",
+                    return_value={
+                        "tag_name": "v2.2.0",
+                        "html_url": "https://github.com/x/releases/v2.2.0",
+                    },
+                ):
+                    ctrl._run_update_check()
+
+                self.assertFalse(ctrl._update_available)
+                self.assertIsNone(ctrl._update_tag)
+                self.assertIsNone(ctrl._update_url)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_dismissed_mid_flight_suppresses_stale_result(self) -> None:
+        """WR-04 TOCTOU: if the exact tag is dismissed *after* kickoff but
+        *before* the in-flight result is applied, the pill must stay hidden."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.dismissed_update_version = "v2.2.0"
+                ctrl.state.update_last_checked = 0.0
+                ctrl.state.update_check_enabled = True
+                with patch(
+                    "update_checker.check_for_update",
+                    return_value={
+                        "tag_name": "v2.2.0",
+                        "html_url": "https://github.com/x/releases/v2.2.0",
+                    },
+                ):
+                    ctrl._run_update_check()
+
+                self.assertFalse(ctrl._update_available)
+                self.assertIsNone(ctrl._update_tag)
             finally:
                 for p in patchers:
                     p.stop()

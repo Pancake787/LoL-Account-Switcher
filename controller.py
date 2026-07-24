@@ -24,6 +24,14 @@ from models import Account, AppState, RankInfo, SwitchStatus
 #: boundary — Plan 08-05 does not modify it).
 _RETRY_SECONDS_RE = re.compile(r"(\d+)")
 
+#: CR-01: a GitHub release ``tag_name`` is untrusted remote data. Before it is
+#: ever used to build a URL shown to the user, it must match this shape (an
+#: optional leading "v" followed by a digit and then only version-safe
+#: characters) — anything else is rejected outright and no update pill is
+#: shown for that result. This intentionally does not rely on the release
+#: API's ``html_url`` field at all (see ``_run_update_check``).
+_UPDATE_TAG_RE = re.compile(r"^v?[0-9][A-Za-z0-9._-]*$")
+
 
 def _extract_retry_seconds(message: str) -> str:
     """Best-effort extraction of the retry-after seconds from a RiotAPIError message.
@@ -1278,11 +1286,38 @@ class Controller:
             self.state.update_last_checked = time.time()
             config.save_state(self.state)
 
-        if result and result.get("tag_name") != self.state.dismissed_update_version:
-            self._update_available = True
-            self._update_tag = result.get("tag_name")
-            self._update_url = result.get("html_url")
-            self._push_state()
+        if not result:
+            return
+
+        # WR-04 TOCTOU guard: re-check current settings state at the point
+        # the result is *applied*, not only at kickoff in
+        # start_update_check(). A user may disable the check (or dismiss
+        # this exact tag) in Settings while this worker's network round-trip
+        # is still in flight; without re-checking here, the stale in-flight
+        # result would silently resurrect a pill the user just turned off.
+        if not self.state.update_check_enabled:
+            return
+
+        tag_name = result.get("tag_name") or ""
+        if tag_name == self.state.dismissed_update_version:
+            return
+
+        # CR-01: never trust the GitHub Releases API's `html_url` field for
+        # anything that reaches open_external_url — a compromised/malicious
+        # release entry would flow unvalidated straight into a bridge method
+        # whose allowlist checks operate on the URL text itself. Instead,
+        # validate the untrusted `tag_name` against a strict version-tag
+        # shape and construct the release URL server-side from the
+        # hardcoded, trusted REPO constant.
+        if not _UPDATE_TAG_RE.match(tag_name):
+            return
+
+        self._update_available = True
+        self._update_tag = tag_name
+        self._update_url = (
+            f"https://github.com/{update_checker.REPO}/releases/tag/{tag_name}"
+        )
+        self._push_state()
 
     def dismiss_update(self, version: str) -> None:
         """Persist the dismissed version and hide the pill (D-14).

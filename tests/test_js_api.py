@@ -416,6 +416,73 @@ class TestOpenExternalUrlBridge(unittest.TestCase):
             self.assertEqual(result, {"ok": False})
             mock_browser.open.assert_not_called()
 
+    def test_rejects_backslash_before_at_parser_confusion(self) -> None:
+        """CR-01: `urlsplit` and the WHATWG URL Standard disagree on how a
+        backslash before an `@` in the authority is parsed for https/http
+        schemes. `urlsplit("https://evil.com\\@github.com/x").hostname` ==
+        "github.com" (passing a naive allowlist check) while every real
+        browser navigates to evil.com. Must be rejected outright."""
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("https://evil.com\\@github.com/malicious-path")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
+
+    def test_rejects_plain_userinfo_at_trick(self) -> None:
+        """CR-01: plain userinfo form (`https://github.com@evil.com/x`) must
+        also be rejected — the raw-string gate disallows any `@` at all."""
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("https://github.com@evil.com/x")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
+
+    def test_rejects_http_downgrade_of_allowlisted_host(self) -> None:
+        """CR-01: the raw-string prefix gate requires an exact `https://`
+        origin — a plain http:// URL to an otherwise-allowlisted host must
+        still be rejected (covers the downgrade variant beyond the existing
+        developer.riotgames.com http test)."""
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("http://github.com/x")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
+
+    def test_rejects_uppercase_scheme_case_trick(self) -> None:
+        """CR-01: an uppercase/mixed-case scheme must not slip past the
+        raw-string prefix gate (which is explicitly case-insensitive) nor
+        the parsed-scheme check."""
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("HTTPS://evil.com\\@github.com/x")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
+
+    def test_allows_uppercase_https_scheme_for_allowlisted_host(self) -> None:
+        """The case-insensitive prefix gate must still allow a legitimately
+        uppercased scheme to an actually-allowlisted origin through."""
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("HTTPS://github.com/Pancake787/LoL-Account-Switcher")
+            self.assertEqual(result, {"ok": True})
+            mock_browser.open.assert_called_once()
+
+    def test_rejects_whitespace_in_url(self) -> None:
+        """CR-01: embedded whitespace/control characters (another class of
+        parser-confusion vector across different URL parsers) must be
+        rejected outright."""
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("https://github.com/\t@evil.com/x")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
