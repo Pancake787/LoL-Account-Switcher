@@ -120,18 +120,6 @@ class TestRiotAPIError(unittest.TestCase):
 
 
 class TestModuleConstants(unittest.TestCase):
-    def test_regional_host(self):
-        import rank_service
-        self.assertEqual(rank_service.REGIONAL_HOST, "europe.api.riotgames.com")
-
-    def test_platform_hosts_euw(self):
-        import rank_service
-        self.assertEqual(rank_service.PLATFORM_HOSTS["EUW"], "euw1.api.riotgames.com")
-
-    def test_platform_hosts_eune(self):
-        import rank_service
-        self.assertEqual(rank_service.PLATFORM_HOSTS["EUNE"], "eun1.api.riotgames.com")
-
     def test_apex_tiers_set(self):
         import rank_service
         self.assertIn("MASTER", rank_service.APEX_TIERS)
@@ -162,6 +150,171 @@ class TestModuleConstants(unittest.TestCase):
                         f"rank_service.py must not import '{module}', "
                         f"but found: {stripped!r}"
                     )
+
+
+# ---------------------------------------------------------------------------
+# Test: PLATFORM_TO_REGIONAL routing table (REGION-01, REGION-02)
+# ---------------------------------------------------------------------------
+
+
+class TestPlatformToRegional(unittest.TestCase):
+    def setUp(self):
+        import rank_service
+        self.rank_service = rank_service
+
+    def test_exactly_15_keys(self):
+        """RESEARCH.md-verified table has exactly 15 live platform ids."""
+        self.assertEqual(len(self.rank_service.PLATFORM_TO_REGIONAL), 15)
+
+    def test_americas_cluster(self):
+        for pid in ("NA1", "BR1", "LA1", "LA2"):
+            self.assertEqual(self.rank_service.PLATFORM_TO_REGIONAL[pid], "americas")
+
+    def test_asia_cluster(self):
+        for pid in ("KR", "JP1"):
+            self.assertEqual(self.rank_service.PLATFORM_TO_REGIONAL[pid], "asia")
+
+    def test_europe_cluster(self):
+        for pid in ("EUW1", "EUN1", "ME1", "TR1", "RU"):
+            self.assertEqual(self.rank_service.PLATFORM_TO_REGIONAL[pid], "europe")
+
+    def test_sea_cluster(self):
+        for pid in ("OC1", "SG2", "TW2", "VN2"):
+            self.assertEqual(self.rank_service.PLATFORM_TO_REGIONAL[pid], "sea")
+
+
+class TestRegionalHostFor(unittest.TestCase):
+    def setUp(self):
+        import rank_service
+        self.rank_service = rank_service
+
+    def test_europe_default(self):
+        self.assertEqual(
+            self.rank_service.regional_host_for("EUW1"), "europe.api.riotgames.com"
+        )
+
+    def test_sea_default_no_override(self):
+        """Default/match-v5 endpoint keeps SEA-cluster platforms on the real sea host."""
+        self.assertEqual(
+            self.rank_service.regional_host_for("OC1"), "sea.api.riotgames.com"
+        )
+
+    def test_sea_account_v1_override_to_asia(self):
+        """Pitfall 1: account-v1 has no SEA regional host — must override to asia."""
+        self.assertEqual(
+            self.rank_service.regional_host_for("OC1", endpoint="account-v1"),
+            "asia.api.riotgames.com",
+        )
+
+    def test_all_sea_platforms_override_for_account_v1(self):
+        for pid in ("OC1", "SG2", "TW2", "VN2"):
+            self.assertEqual(
+                self.rank_service.regional_host_for(pid, endpoint="account-v1"),
+                "asia.api.riotgames.com",
+            )
+
+    def test_non_sea_account_v1_unaffected(self):
+        self.assertEqual(
+            self.rank_service.regional_host_for("EUW1", endpoint="account-v1"),
+            "europe.api.riotgames.com",
+        )
+
+    def test_case_insensitive(self):
+        self.assertEqual(
+            self.rank_service.regional_host_for("euw1"), "europe.api.riotgames.com"
+        )
+
+    def test_unknown_platform_raises_keyerror(self):
+        """T-08-01: unknown platform ids raise rather than silently default."""
+        with self.assertRaises(KeyError):
+            self.rank_service.regional_host_for("ZZ9")
+
+
+class TestPlatformHost(unittest.TestCase):
+    def setUp(self):
+        import rank_service
+        self.rank_service = rank_service
+
+    def test_legacy_euw_alias(self):
+        """Defensive normalization: bare 'EUW' still resolves correctly."""
+        self.assertEqual(self.rank_service.platform_host("EUW"), "euw1.api.riotgames.com")
+
+    def test_legacy_eune_alias(self):
+        """Defensive normalization: bare 'EUNE' maps to 'EUN1' (Pitfall 2)."""
+        self.assertEqual(self.rank_service.platform_host("EUNE"), "eun1.api.riotgames.com")
+
+    def test_canonical_euw1_passthrough(self):
+        self.assertEqual(self.rank_service.platform_host("EUW1"), "euw1.api.riotgames.com")
+
+    def test_canonical_na1(self):
+        self.assertEqual(self.rank_service.platform_host("NA1"), "na1.api.riotgames.com")
+
+    def test_case_insensitive(self):
+        self.assertEqual(self.rank_service.platform_host("euw1"), "euw1.api.riotgames.com")
+
+
+# ---------------------------------------------------------------------------
+# Test: validate_api_key (D-03, cheapest reliable key-validation call)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateApiKey(unittest.TestCase):
+    def setUp(self):
+        import rank_service
+        self.rank_service = rank_service
+
+    @patch("rank_service.requests")
+    def test_200_returns_true(self, mock_requests):
+        mock_requests.get.return_value = _MockResponse(200)
+        self.assertTrue(self.rank_service.validate_api_key("RGAPI-secret-key"))
+
+    @patch("rank_service.requests")
+    def test_401_returns_false(self, mock_requests):
+        mock_requests.get.return_value = _MockResponse(401)
+        self.assertFalse(self.rank_service.validate_api_key("RGAPI-secret-key"))
+
+    @patch("rank_service.requests")
+    def test_403_returns_false(self, mock_requests):
+        mock_requests.get.return_value = _MockResponse(403)
+        self.assertFalse(self.rank_service.validate_api_key("RGAPI-secret-key"))
+
+    @patch("rank_service.requests")
+    def test_500_raises_riot_api_error(self, mock_requests):
+        mock_requests.get.return_value = _MockResponse(500)
+        with self.assertRaises(self.rank_service.RiotAPIError) as ctx:
+            self.rank_service.validate_api_key("RGAPI-secret-key")
+        self.assertEqual(ctx.exception.status_code, 500)
+
+    @patch("rank_service.requests")
+    def test_api_key_never_in_raised_message(self, mock_requests):
+        """T-08-02: candidate key must never leak into a raised RiotAPIError message."""
+        secret = "RGAPI-super-secret-value-12345"
+        mock_requests.get.return_value = _MockResponse(500)
+        with self.assertRaises(self.rank_service.RiotAPIError) as ctx:
+            self.rank_service.validate_api_key(secret)
+        self.assertNotIn(secret, str(ctx.exception))
+
+    @patch("rank_service.requests")
+    def test_uses_platform_host_and_status_endpoint(self, mock_requests):
+        mock_requests.get.return_value = _MockResponse(200)
+        self.rank_service.validate_api_key("key", platform_id="NA1")
+        url = mock_requests.get.call_args[0][0]
+        self.assertIn("na1.api.riotgames.com", url)
+        self.assertIn("lol/status/v4/platform-data", url)
+
+    @patch("rank_service.requests")
+    def test_sends_token_header(self, mock_requests):
+        mock_requests.get.return_value = _MockResponse(200)
+        self.rank_service.validate_api_key("my-secret-key")
+        headers = mock_requests.get.call_args[1]["headers"]
+        self.assertEqual(headers["X-Riot-Token"], "my-secret-key")
+
+    @patch("rank_service.requests")
+    def test_timeout_10(self, mock_requests):
+        mock_requests.get.return_value = _MockResponse(200)
+        self.rank_service.validate_api_key("key")
+        call_kwargs = mock_requests.get.call_args[1]
+        self.assertEqual(call_kwargs.get("timeout"), 10)
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +467,26 @@ class TestResolvePuuid(unittest.TestCase):
         self.assertNotIn("?foo=bar", url)
         self.assertIn("%3Ffoo%3Dbar", url)
 
+    @patch("rank_service.requests")
+    def test_default_platform_id_keeps_europe_host(self, mock_requests):
+        """Backward compat: no platform_id arg still resolves to europe (old REGIONAL_HOST)."""
+        mock_requests.get.return_value = _MockResponse(200, {"puuid": "p"})
+
+        self.rank_service.resolve_puuid("Main", "EUW", "key")
+
+        url = mock_requests.get.call_args[0][0]
+        self.assertIn("europe.api.riotgames.com", url)
+
+    @patch("rank_service.requests")
+    def test_sea_platform_id_applies_account_v1_override(self, mock_requests):
+        """REGION-01/Pitfall 1: passing a SEA-cluster platform_id routes through asia."""
+        mock_requests.get.return_value = _MockResponse(200, {"puuid": "p"})
+
+        self.rank_service.resolve_puuid("Main", "Tag", "key", platform_id="OC1")
+
+        url = mock_requests.get.call_args[0][0]
+        self.assertIn("asia.api.riotgames.com", url)
+
 
 # ---------------------------------------------------------------------------
 # Test: fetch_entries (2-call chain primary)
@@ -348,14 +521,16 @@ class TestFetchEntries(unittest.TestCase):
         self.assertIn("eun1.api.riotgames.com", url)
 
     @patch("rank_service.requests")
-    def test_unknown_region_defaults_to_euw(self, mock_requests):
-        """Unknown region defaults to EUW platform host."""
+    def test_unrecognized_region_is_lowercased_not_defaulted(self, mock_requests):
+        """Pitfall 5: platform_host no longer silently defaults unrecognized regions
+        to EUW — whitelist enforcement happens at the controller layer (Plan 08-03).
+        This module only defensively normalizes the two legacy aliases (EUW/EUNE)."""
         mock_requests.get.return_value = _MockResponse(200, [])
 
         self.rank_service.fetch_entries("p", "NA", "key")
 
         url = mock_requests.get.call_args[0][0]
-        self.assertIn("euw1.api.riotgames.com", url)
+        self.assertIn("na.api.riotgames.com", url)
 
     @patch("rank_service.requests")
     def test_returns_json_list(self, mock_requests):

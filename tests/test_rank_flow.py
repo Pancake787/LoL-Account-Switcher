@@ -170,7 +170,9 @@ class TestMigration(unittest.TestCase):
         self.assertEqual(len(state.accounts), 1)
         acc = state.accounts[0]
         self.assertIsNone(acc.riot_id)
-        self.assertEqual(acc.region, "EUW")
+        # Phase 8 (REGION-02/D-12): the missing-region default is now the
+        # canonical platform id "EUW1", not the legacy bare "EUW".
+        self.assertEqual(acc.region, "EUW1")
         self.assertIsNone(acc.puuid)
         self.assertIsNone(acc.rank_cache)
         self.assertIsNone(acc.rank_cache_ts)
@@ -213,7 +215,10 @@ class TestMigration(unittest.TestCase):
         loaded = config.load_state()
         acc = loaded.accounts[0]
         self.assertEqual(acc.riot_id, "Main#EUW")
-        self.assertEqual(acc.region, "EUW")
+        # Phase 8 (REGION-02/D-12): legacy "EUW" is silently migrated to "EUW1"
+        # on load — this round-trip proves the migration is transparent even
+        # when the in-memory Account was constructed with the legacy value.
+        self.assertEqual(acc.region, "EUW1")
         self.assertEqual(acc.puuid, "abc123puuid")
         self.assertIsNotNone(acc.rank_cache)
         self.assertEqual(acc.rank_cache_ts, 1234567890.0)

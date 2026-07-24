@@ -18,7 +18,12 @@ class Account:
     has_snapshot: bool = False  # True wenn RiotGamesPrivateSettings.yaml gespeichert
     # Phase 2 additions — all Optional with defaults so existing JSON migrates cleanly
     riot_id: Optional[str] = None       # "gameName#tagLine" — nur fuer API-Lookup
-    region: str = "EUW"                 # "EUW" oder "EUNE"
+    # Canonical Riot platform id (e.g. "EUW1", "EUN1", "NA1") — Phase 8 REGION-01/02.
+    # Legacy pre-Phase-8 values ("EUW", "EUNE") are silently migrated to canonical
+    # ids on load by config._normalize_region (D-12); this default stays the
+    # pre-migration literal since config.py always sets region explicitly when
+    # constructing an Account from JSON.
+    region: str = "EUW"
     puuid: Optional[str] = None         # cached after first resolve_puuid call
     rank_cache: Optional[dict] = None   # serialised RankInfo; None = never loaded
     rank_cache_ts: Optional[float] = None  # time.time() of last successful fetch
@@ -69,3 +74,10 @@ class AppState:
     active_username: Optional[str] = None   # Username des aktiven Accounts
     status: SwitchStatus = SwitchStatus.IDLE
     status_message: str = ""
+    # Phase 8 additions — app-wide persisted settings (ONBOARD-02/03/04).
+    # All backward-compatible defaults so pre-Phase-8 accounts.json loads cleanly.
+    language: Optional[str] = None          # "de"/"en"; None = not yet detected/set
+    update_check_enabled: bool = True       # ONBOARD-03 toggle (D-07/D-14)
+    dismissed_update_version: Optional[str] = None  # last update-pill version dismissed (D-14)
+    disable_gpu: bool = True                # promotes the existing --disable-gpu opt-out (D-07)
+    update_last_checked: float = 0.0        # time.time() of last GitHub Releases check (D-14 TTL)
