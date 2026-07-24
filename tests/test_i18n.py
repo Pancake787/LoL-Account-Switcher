@@ -9,11 +9,76 @@ from __future__ import annotations
 
 import json
 import pathlib
+import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import MagicMock, patch
 
 from gui import i18n
+
+# ---------------------------------------------------------------------------
+# Fake keyring module — backed by a simple dict, never touches WCM.
+# Mirrors the _FakeKeyring pattern in test_account_mgmt.py/test_settings.py
+# exactly, so importing controller.py (Plan 08-05 bridge-contract tests below)
+# stays hermetic even when this file is the FIRST to import credential_store
+# in a given pytest run (e.g. `pytest tests/test_i18n.py tests/test_js_api.py`
+# in isolation, per the plan's own verify command).
+# ---------------------------------------------------------------------------
+
+
+class _FakeKeyringErrors:
+    """Minimal stub of keyring.errors."""
+
+    class PasswordDeleteError(Exception):
+        pass
+
+
+class _FakeKeyring:
+    """In-memory keyring backend."""
+
+    def __init__(self):
+        self._store: dict[tuple[str, str], str] = {}
+        self.errors = _FakeKeyringErrors()
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self._store[(service, username)] = password
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self._store.get((service, username))
+
+    def delete_password(self, service: str, username: str) -> None:
+        key = (service, username)
+        if key not in self._store:
+            raise _FakeKeyringErrors.PasswordDeleteError(f"{service}/{username} not found")
+        del self._store[key]
+
+    def reset(self) -> None:
+        self._store.clear()
+
+
+_fake_keyring = _FakeKeyring()
+
+# Inject fake keyring into sys.modules BEFORE importing credential_store —
+# no-op if a sibling test file already imported credential_store first (its
+# module-level `keyring` binding is then fixed for the whole process); the
+# per-test `credential_store.delete_api_key()` cleanup below handles that
+# case regardless of which backend ended up bound (08-04-SUMMARY precedent).
+if "keyring" not in sys.modules:
+    _keyring_mod = types.ModuleType("keyring")
+    _keyring_mod.set_password = _fake_keyring.set_password
+    _keyring_mod.get_password = _fake_keyring.get_password
+    _keyring_mod.delete_password = _fake_keyring.delete_password
+    _keyring_errors_mod = types.ModuleType("keyring.errors")
+    _keyring_errors_mod.PasswordDeleteError = _FakeKeyringErrors.PasswordDeleteError
+    _keyring_mod.errors = _keyring_errors_mod
+    sys.modules["keyring"] = _keyring_mod
+    sys.modules["keyring.errors"] = _keyring_errors_mod
+
+import config  # noqa: E402
+import controller as controller_module  # noqa: E402
+import credential_store  # noqa: E402
+from models import Account  # noqa: E402
 
 
 class TestRealCatalogLoadsCleanly(unittest.TestCase):
@@ -140,6 +205,136 @@ class TestDetectDefaultLanguage(unittest.TestCase):
         mock_kernel32.GetUserDefaultUILanguage.side_effect = OSError("boom")
         with patch("gui.i18n.ctypes.windll.kernel32", mock_kernel32):
             self.assertEqual(i18n.detect_default_language(), "en")
+
+
+class _FakeWindowState:
+    """Attribute sink for window.state.* writes — accepts any attribute."""
+
+
+class _FakeWindow:
+    def __init__(self) -> None:
+        self.state = _FakeWindowState()
+
+
+class TestControllerI18nBridgeContract(unittest.TestCase):
+    """Plan 08-05 (ONBOARD-04) controller-side bridge-contract assertions.
+
+    Covers the acceptance criteria: status_key/status_params contract,
+    translated ValueErrors, set_language persistence + live push, and the
+    first-run System-Locale default.
+    """
+
+    def _make_controller(self, tmp_path: pathlib.Path, language=None):
+        """Construct a hermetic Controller against a temp accounts.json.
+
+        If *language* is given, it is pre-written into accounts.json so
+        ``config.load_state()`` returns it directly (detection skipped,
+        matching a returning user with a persisted choice). If *language*
+        is None, no file is written — Controller.__init__ must run the
+        first-run System-Locale detection (D-15).
+        """
+        accounts_json = tmp_path / "accounts.json"
+        if language is not None:
+            accounts_json.write_text(
+                json.dumps({"accounts": [], "active_username": None, "language": language}),
+                encoding="utf-8",
+            )
+        patcher_app = patch.object(config, "APP_DIR", tmp_path)
+        patcher_json = patch.object(config, "ACCOUNTS_JSON", accounts_json)
+        patcher_sessions = patch.object(config, "SESSIONS_DIR", tmp_path / "sessions")
+        patcher_app.start()
+        patcher_json.start()
+        patcher_sessions.start()
+        self.addCleanup(patcher_app.stop)
+        self.addCleanup(patcher_json.stop)
+        self.addCleanup(patcher_sessions.stop)
+        config.ensure_dirs()
+        # Cross-file fake-keyring test-isolation quirk (08-04-SUMMARY precedent):
+        # clear via the real credential_store API (writes through to whichever
+        # backend ended up bound at first import), guaranteeing a clean slate
+        # regardless of test-file collection order.
+        credential_store.delete_api_key()
+        credential_store.delete_api_key_file()
+
+        fake_window = _FakeWindow()
+        ctrl = controller_module.Controller(fake_window)
+        self.addCleanup(ctrl.shutdown)
+        return ctrl, fake_window
+
+    def tearDown(self) -> None:
+        # Module-global i18n state must not leak into other test files.
+        i18n.set_language("en")
+
+    def test_switch_step_pushes_killing_client_status_key(self) -> None:
+        """switch_account's first status update sets window.state.status_key
+        to the RAW key "status.killing_client" (not pre-formatted German
+        text) with empty params — the core of the bridge-contract change."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, fake_window = self._make_controller(pathlib.Path(tmp), language="de")
+            acc = Account(username="u1", display_name="Main", has_snapshot=True)
+            ctrl.state.accounts = [acc]
+            # Patch out the background thread so the assertion below reads
+            # state exactly as switch_account() left it on the main thread —
+            # no race with the worker thread's own subsequent status updates.
+            with patch("controller.threading.Thread") as mock_thread, \
+                 patch("riot_client.is_game_running", return_value=False):
+                ctrl.switch_account(acc)
+            mock_thread.assert_called_once()
+            self.assertEqual(fake_window.state.status_key, "status.killing_client")
+            self.assertEqual(fake_window.state.status_params, {})
+
+    def test_rank_401_sets_api_key_invalid_status_key(self) -> None:
+        """A 401 RiotAPIError from a background rank fetch sets
+        window.state.status_key == "status.api_key_invalid" (D-09/ONBOARD-04)."""
+        from rank_service import RiotAPIError
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, fake_window = self._make_controller(pathlib.Path(tmp), language="de")
+            acc = Account(username="u1", display_name="Main", has_snapshot=True, puuid="puuid-1")
+            ctrl.state.accounts = [acc]
+            ctrl._on_rank_error("u1", RiotAPIError(401, "unauthorized"))
+            self.assertEqual(fake_window.state.status_key, "status.api_key_invalid")
+            self.assertEqual(fake_window.state.status_params, {})
+            self.assertTrue(fake_window.state.api_key_warning)
+
+    def test_duplicate_account_error_is_translated_and_matches_de_literal(self) -> None:
+        """add_account's duplicate-username ValueError equals gui.i18n.t(...)
+        for the current language, and the DE text is byte-identical to the
+        pre-refactor literal (D-15: zero visible change for existing DE users)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, _ = self._make_controller(pathlib.Path(tmp), language="de")
+            ctrl.add_account("Main", "dupuser", "pw1")
+            with self.assertRaises(ValueError) as cm:
+                ctrl.add_account("Second", "dupuser", "pw2")
+            expected = i18n.t("error.account_exists", username="dupuser")
+            self.assertEqual(str(cm.exception), expected)
+            self.assertEqual(
+                str(cm.exception),
+                "Ein Account mit dem Benutzernamen „dupuser“ ist bereits vorhanden.",
+            )
+
+    def test_set_language_switches_persists_and_pushes(self) -> None:
+        """set_language("en") flips gui.i18n's current language, persists
+        state.language via config.save_state, and pushes window.state.language."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            ctrl, fake_window = self._make_controller(tmp_path, language="de")
+            ctrl.set_language("en")
+            self.assertEqual(i18n.get_language(), "en")
+            self.assertEqual(ctrl.state.language, "en")
+            self.assertEqual(fake_window.state.language, "en")
+            # Config round-trip — persisted, not just in-memory.
+            reloaded = config.load_state()
+            self.assertEqual(reloaded.language, "en")
+
+    def test_first_run_locale_default_applied(self) -> None:
+        """A fresh controller (state.language is None) sets state.language
+        from gui.i18n.detect_default_language() (D-15)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            with patch.object(i18n, "detect_default_language", return_value="de"):
+                ctrl, _ = self._make_controller(tmp_path, language=None)
+            self.assertEqual(ctrl.state.language, "de")
+            self.assertEqual(i18n.get_language(), "de")
 
 
 if __name__ == "__main__":

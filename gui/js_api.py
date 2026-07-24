@@ -291,6 +291,18 @@ class JsApi:
         """
         self._controller.set_gpu(enabled)
 
+    def set_language(self, lang: str) -> None:
+        """Switch the active UI language live (Plan 08-05, D-15/D-16, ONBOARD-04).
+
+        Thin delegate — persistence, gui.i18n's current-language switch, and
+        the state push that drives app.js's live re-render all live in
+        ``controller.set_language`` (T-04-05 bridge guard).
+
+        Args:
+            lang: Language code, e.g. "de" or "en".
+        """
+        self._controller.set_language(lang)
+
     def get_settings(self) -> dict:
         """Return the current app-wide settings for the Settings modal.
 

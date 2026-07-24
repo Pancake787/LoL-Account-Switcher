@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import threading
 import time
@@ -13,8 +14,43 @@ import core
 import credential_store
 import rank_service
 import riot_client
-from gui import _clipboard
+from gui import _clipboard, i18n
 from models import Account, AppState, RankInfo, SwitchStatus
+
+#: Plan 08-05 (ONBOARD-04): pulls the retry-after seconds out of rank_service's
+#: hardcoded "Rate limit — retry nach {n}s" RiotAPIError message so it can be
+#: re-interpolated into the i18n "riotapi.rate_limit" key in the current
+#: language (rank_service.py stays GUI-free/untranslated per its module
+#: boundary — Plan 08-05 does not modify it).
+_RETRY_SECONDS_RE = re.compile(r"(\d+)")
+
+
+def _extract_retry_seconds(message: str) -> str:
+    """Best-effort extraction of the retry-after seconds from a RiotAPIError message.
+
+    Falls back to "60" (matches rank_service._handle_response's own default
+    Retry-After) if no digits are found — never raises.
+    """
+    match = _RETRY_SECONDS_RE.search(message)
+    return match.group(1) if match else "60"
+
+
+def _translate_riot_error(exc: rank_service.RiotAPIError) -> str:
+    """Translate a rank_service.RiotAPIError into current-language catalog text.
+
+    Plan 08-05 (ONBOARD-04, Pitfall 3): rank_service.py raises with hardcoded
+    German text (its module boundary keeps it GUI-free/i18n-free — Plan 08-05
+    does not modify it). This maps the status code to the matching
+    ``riotapi.*`` strings.json key so the message crosses the bridge
+    translated, without rank_service ever needing to know about i18n.
+    """
+    if exc.status_code in (401, 403):
+        return i18n.t("riotapi.key_unauthorized")
+    if exc.status_code == 404:
+        return i18n.t("riotapi.player_not_found")
+    if exc.status_code == 429:
+        return i18n.t("riotapi.rate_limit", n=_extract_retry_seconds(str(exc)))
+    return i18n.t("riotapi.api_error", code=exc.status_code)
 
 # ---------------------------------------------------------------------------
 # Module-level constants for rank refresh orchestration (D-23 / D-24)
@@ -61,6 +97,12 @@ class Controller:
         #: error, cleared on the next successful rank fetch. Ephemeral, like
         #: _client_running/_game_live — never persisted to accounts.json.
         self._api_key_warning: bool = False
+        #: Plan 08-05 (ONBOARD-04, D-15/D-16): the current status key + params
+        #: mirrored to window.state.status_key/status_params (via _push_state)
+        #: so app.js can re-resolve them from strings.json in any language.
+        #: Ephemeral, like _client_running/_api_key_warning — never persisted.
+        self._status_key: Optional[str] = None
+        self._status_params: dict = {}
         #: Set by webview_window.start() after construction; stopped centrally
         #: in shutdown() (WR-03). None when no poller was wired (e.g. headless/tests).
         self._status_poller = None
@@ -77,6 +119,16 @@ class Controller:
 
         config.ensure_dirs()
         self.state: AppState = config.load_state()
+
+        # Plan 08-05 (D-15): first-run default is the System-Locale; a
+        # persisted user choice (self.state.language already set from a prior
+        # run/config.save_state) always wins over re-detection. Setting
+        # gui.i18n's current language here (not just on the first Settings
+        # open) means every Python-originated status/error message resolves
+        # in the right language from the very first message (D-16).
+        if self.state.language is None:
+            self.state.language = i18n.detect_default_language()
+        i18n.set_language(self.state.language)
 
         # D-35 / SD-06: track accounts.json mtime to detect external changes
         self._accounts_json_mtime: float = self._get_accounts_mtime()
@@ -191,6 +243,12 @@ class Controller:
         # api_key_warning drives the persistent header hint on 401/403 (D-09).
         window.state.has_api_key = self.has_api_key()
         window.state.api_key_warning = self._api_key_warning
+        # Plan 08-05 (ONBOARD-04): key+params status contract + current
+        # language, so app.js can resolve/re-resolve status text via the
+        # shared strings.json and live-re-render on a language switch (D-16).
+        window.state.status_key = self._status_key
+        window.state.status_params = self._status_params
+        window.state.language = self.state.language
 
     def update_client_status(self, client_running: bool, game_live: bool) -> None:
         """Handle a status transition from StatusPoller.on_change (STATUS-01/D-17).
@@ -352,11 +410,11 @@ class Controller:
                         or the API returns 404 for the Riot-ID.
         """
         if not display_name or not display_name.strip():
-            raise ValueError("Anzeigename darf nicht leer sein.")
+            raise ValueError(i18n.t("error.name_empty"))
         if not username or not username.strip():
-            raise ValueError("Riot-Benutzername darf nicht leer sein.")
+            raise ValueError(i18n.t("error.username_empty"))
         if not password or not password.strip():
-            raise ValueError("Passwort darf nicht leer sein.")
+            raise ValueError(i18n.t("error.password_empty"))
 
         # Normalise once: the stripped username is the single identity used as the
         # WCM key, the snapshot directory name, AND the duplicate-detection key —
@@ -373,9 +431,7 @@ class Controller:
 
         for acc in self.state.accounts:
             if acc.username == username:
-                raise ValueError(
-                    f"Ein Account mit dem Benutzernamen „{username}“ ist bereits vorhanden."
-                )
+                raise ValueError(i18n.t("error.account_exists", username=username))
 
         # Phase 2: validate riot_id format before storing credentials (T-02-08)
         puuid: Optional[str] = None
@@ -383,9 +439,7 @@ class Controller:
             riot_id = riot_id.strip()
             # Reject path separators to prevent URL-path injection (T-02-08 / ASVS V5)
             if "/" in riot_id or "\\" in riot_id:
-                raise ValueError(
-                    "Riot-ID darf keine Schrägstriche (/ oder \\) enthalten."
-                )
+                raise ValueError(i18n.t("error.riot_id_slash"))
 
         # T-08-08 / Pitfall 5 (ASVS V5): whitelist the region BEFORE any Riot API
         # host is built. Case-insensitive; legacy bare "EUW"/"EUNE" strings are
@@ -395,7 +449,7 @@ class Controller:
         region_upper = region.strip().upper()
         region = rank_service._LEGACY_PLATFORM_ALIASES.get(region_upper, region_upper)
         if region not in rank_service.PLATFORM_TO_REGIONAL:
-            raise ValueError("Ungültige Region ausgewählt.")
+            raise ValueError(i18n.t("error.region_invalid"))
 
         # Phase 2: resolve PUUID if riot_id provided and API key is present (D-19).
         # WR-04: PUUID resolution runs BEFORE the credential is stored — resolution
@@ -407,32 +461,24 @@ class Controller:
                 # Split "gameName#tagLine" — reject if malformed
                 parts = riot_id.split("#", 1)
                 if len(parts) != 2:
-                    raise ValueError(
-                        "Riot-ID muss das Format 'Spielername#Tag' haben (z.B. Main#EUW)."
-                    )
+                    raise ValueError(i18n.t("error.riot_id_format"))
                 # WR-05: strip both parts and reject whitespace-only segments so a
                 # malformed Riot-ID (e.g. "Name# ") never reaches the API.
                 game_name, tag_line = parts[0].strip(), parts[1].strip()
                 if not game_name or not tag_line:
-                    raise ValueError(
-                        "Riot-ID muss das Format 'Spielername#Tag' haben (z.B. Main#EUW)."
-                    )
+                    raise ValueError(i18n.t("error.riot_id_format"))
                 try:
                     puuid = rank_service.resolve_puuid(
                         game_name, tag_line, api_key, platform_id=region
                     )
                 except rank_service.RiotAPIError as exc:
                     if exc.status_code == 404:
-                        raise ValueError(
-                            "Riot-ID nicht gefunden. Tippfehler?"
-                        ) from exc
-                    raise ValueError(str(exc)) from exc
+                        raise ValueError(i18n.t("error.riot_id_not_found")) from exc
+                    raise ValueError(_translate_riot_error(exc)) from exc
                 except requests.exceptions.RequestException as exc:
                     # CR-02: network/transport failure (timeout, connection error).
                     # Convert to a ValueError the dialog can surface inline.
-                    raise ValueError(
-                        "Netzwerkfehler beim Prüfen der Riot-ID. Bitte erneut versuchen."
-                    ) from exc
+                    raise ValueError(i18n.t("error.riot_id_network")) from exc
             # else: deferred validation — store with puuid=None (D-19)
 
         # Store password in Windows Credential Manager — NOT in accounts.json.
@@ -513,7 +559,7 @@ class Controller:
             ValueError: If ``new_display_name`` is empty or whitespace (German message).
         """
         if not new_display_name or not new_display_name.strip():
-            raise ValueError("Anzeigename darf nicht leer sein.")
+            raise ValueError(i18n.t("error.name_empty"))
 
         for acc in self.state.accounts:
             if acc.username == username:
@@ -626,16 +672,14 @@ class Controller:
         if riot_id:
             riot_id = riot_id.strip()
             if "/" in riot_id or "\\" in riot_id:
-                raise ValueError(
-                    "Riot-ID darf keine Schrägstriche (/ oder \\) enthalten."
-                )
+                raise ValueError(i18n.t("error.riot_id_slash"))
 
         # T-08-08 / Pitfall 5 (ASVS V5): whitelist the region BEFORE any Riot API
         # host is built — see add_account for the identical rationale/shape.
         region_upper = region.strip().upper()
         region = rank_service._LEGACY_PLATFORM_ALIASES.get(region_upper, region_upper)
         if region not in rank_service.PLATFORM_TO_REGIONAL:
-            raise ValueError("Ungültige Region ausgewählt.")
+            raise ValueError(i18n.t("error.region_invalid"))
 
         puuid: Optional[str] = None
         if riot_id:
@@ -643,29 +687,23 @@ class Controller:
             if api_key:
                 parts = riot_id.split("#", 1)
                 if len(parts) != 2:
-                    raise ValueError(
-                        "Riot-ID muss das Format 'Spielername#Tag' haben (z.B. Main#EUW)."
-                    )
+                    raise ValueError(i18n.t("error.riot_id_format"))
                 # WR-05: strip both parts and reject whitespace-only segments.
                 game_name, tag_line = parts[0].strip(), parts[1].strip()
                 if not game_name or not tag_line:
-                    raise ValueError(
-                        "Riot-ID muss das Format 'Spielername#Tag' haben (z.B. Main#EUW)."
-                    )
+                    raise ValueError(i18n.t("error.riot_id_format"))
                 try:
                     puuid = rank_service.resolve_puuid(
                         game_name, tag_line, api_key, platform_id=region
                     )
                 except rank_service.RiotAPIError as exc:
                     if exc.status_code == 404:
-                        raise ValueError("Riot-ID nicht gefunden. Tippfehler?") from exc
-                    raise ValueError(str(exc)) from exc
+                        raise ValueError(i18n.t("error.riot_id_not_found")) from exc
+                    raise ValueError(_translate_riot_error(exc)) from exc
                 except requests.exceptions.RequestException as exc:
                     # CR-02: convert network/transport failure to a ValueError the
                     # RiotIdDialog can surface inline.
-                    raise ValueError(
-                        "Netzwerkfehler beim Prüfen der Riot-ID. Bitte erneut versuchen."
-                    ) from exc
+                    raise ValueError(i18n.t("error.riot_id_network")) from exc
 
         for acc in self.state.accounts:
             if acc.username == username:
@@ -703,11 +741,7 @@ class Controller:
 
         if riot_client.is_game_running():
             # Hard block — no kill, no swap, no thread (D-07, SWITCH-02)
-            self._set_status(
-                SwitchStatus.ERROR,
-                "Wechsel blockiert: League of Legends läuft gerade. "
-                "Bitte das Match zuerst beenden.",
-            )
+            self._set_status(SwitchStatus.ERROR, "status.blocked_match")
             return
 
         # Snapshot the shared state the worker needs, on the MAIN THREAD, before
@@ -718,7 +752,7 @@ class Controller:
         active_username, snapshot_usernames = self._snapshot_switch_state()
 
         # Start the switch sequence on a background thread
-        self._set_status(SwitchStatus.SWITCHING, "Riot-Client wird beendet…")
+        self._set_status(SwitchStatus.SWITCHING, "status.killing_client")
         threading.Thread(
             target=self._do_switch,
             args=(target, active_username, snapshot_usernames),
@@ -789,28 +823,17 @@ class Controller:
                     # _on_switch_done only mutates AppState + _push_state (thread-safe).
                     self._on_switch_done(target)
                 elif result == core.SwitchResult.BLOCKED:
-                    self._post_error(
-                        "Wechsel blockiert: League of Legends läuft gerade. "
-                        "Bitte das Match zuerst beenden."
-                    )
+                    self._post_error("status.blocked_match")
                 elif result == core.SwitchResult.STOP_FAILED:
-                    self._post_error(
-                        "Riot-Client konnte nicht beendet werden. "
-                        "Bitte manuell schließen und erneut versuchen."
-                    )
+                    self._post_error("status.kill_failed")
                 elif result == core.SwitchResult.NO_SNAPSHOT:
                     # Should not occur for has_snapshot=True, but handle defensively
-                    self._post_error(
-                        "Kein gespeicherter Snapshot gefunden. Bitte den Account erneut einrichten."
-                    )
+                    self._post_error("status.no_snapshot")
                 elif result == core.SwitchResult.RIOT_NOT_FOUND:
-                    self._post_error(
-                        "Riot Client nicht gefunden — die Sitzung wurde gewechselt, "
-                        "aber der Client muss manuell gestartet werden."
-                    )
+                    self._post_error("status.riot_not_found_switched")
                 else:
                     # core.SwitchResult.ERROR or any future value
-                    self._post_error("Unbekannter Fehler. Bitte App neu starten.")
+                    self._post_error("status.unknown_error")
 
             else:
                 # ------------------------------------------------------------------
@@ -830,12 +853,9 @@ class Controller:
                         pass  # best-effort
 
                 # Step 1: kill Riot/League processes + poll until dead
-                self._post_status("Riot-Client wird beendet…")
+                self._post_status("status.killing_client")
                 if not riot_client.stop(timeout=10.0):
-                    self._post_error(
-                        "Riot-Client konnte nicht beendet werden. "
-                        "Bitte manuell schließen und erneut versuchen."
-                    )
+                    self._post_error("status.kill_failed")
                     return  # safe state — no swap attempted (D-12)
 
                 # Refresh the outgoing account's snapshot first (if any) so it keeps its
@@ -851,17 +871,14 @@ class Controller:
 
                 # Clear the live session so Riot opens a fresh login screen (NOT "Sign out").
                 # Deleting the local file does NOT revoke the token server-side.
-                self._post_status("Sitzung wird gewechselt…")
+                self._post_status("status.switching_session")
                 riot_client.clear_session()
 
                 riot_exe = riot_client.find_riot_client_exe()
                 if riot_exe is None:
                     # Riot Client executable not found — do NOT enter the pending
                     # state telling the user to log into a client that never opened (WR-04).
-                    self._post_error(
-                        "Riot Client nicht gefunden — bitte den Riot Client manuell "
-                        "starten und einloggen, dann erneut versuchen."
-                    )
+                    self._post_error("status.riot_not_found_manual")
                     return  # safe state — no pending first-login
                 riot_client.start(riot_exe)
                 # Enter pending-first-login state — direct call on worker thread;
@@ -870,7 +887,7 @@ class Controller:
                 return  # pending state; user must click confirm button
 
         except Exception as exc:  # noqa: BLE001
-            self._post_error(f"Unbekannter Fehler: {exc}. Bitte App neu starten.")
+            self._post_error("status.unknown_error_exc", exc=exc)
 
     def _enter_pending_first_login(self, target: Account) -> None:
         """Enter the pending-first-login state for *target* (D-04 manual confirm flow).
@@ -884,10 +901,8 @@ class Controller:
         self._pending_first_login = target
         self._set_status(
             SwitchStatus.SWITCHING,
-            f'Im Riot-Client als "{target.display_name}" einloggen '
-            f'(mit "Angemeldet bleiben") — '
-            f'der Login-Bildschirm erscheint automatisch. '
-            f'Danach auf "Login fertig — Snapshot speichern" klicken.',
+            "status.pending_login",
+            name=target.display_name,
         )
 
     def confirm_first_login_snapshot(self) -> None:
@@ -923,17 +938,10 @@ class Controller:
             config.save_state(self.state)
             self._accounts_json_mtime = self._get_accounts_mtime()  # D-35 Loop-Schutz
             self._pending_first_login = None
-            self._set_status(
-                SwitchStatus.IDLE,
-                "Snapshot gespeichert. Zukünftig ein-Klick-Wechsel möglich.",
-            )
+            self._set_status(SwitchStatus.IDLE, "status.snapshot_saved")
         else:
             # Not logged in yet — inform the user and keep pending state
-            self._set_status(
-                SwitchStatus.SWITCHING,
-                "Noch kein Login erkannt — bitte zuerst im Riot-Client einloggen, "
-                "dann erneut klicken.",
-            )
+            self._set_status(SwitchStatus.SWITCHING, "status.no_login_yet")
 
     def cancel_first_login(self) -> None:
         """Clear the pending-first-login state without capturing a snapshot.
@@ -1014,10 +1022,7 @@ class Controller:
                                 snapshot, captured on the calling thread (WR-02).
         """
         if riot_client.is_game_running():
-            self._set_status(
-                SwitchStatus.ERROR,
-                "Nicht möglich: League of Legends läuft gerade.",
-            )
+            self._set_status(SwitchStatus.ERROR, "status.recapture_blocked")
             return
 
         # Fall back to a fresh snapshot when invoked without pre-captured values
@@ -1032,12 +1037,9 @@ class Controller:
         # Step 1: kill Riot/League processes + poll until dead.  Required before
         # start() — a single-instance client that is already running would not be
         # restarted otherwise (the reported second-account no-op).
-        self._post_status("Riot-Client wird beendet…")
+        self._post_status("status.killing_client")
         if not riot_client.stop(timeout=10.0):
-            self._post_error(
-                "Riot-Client konnte nicht beendet werden. "
-                "Bitte manuell schließen und erneut versuchen."
-            )
+            self._post_error("status.kill_failed")
             return  # safe state — no clear/restart attempted (D-12)
 
         # Refresh the outgoing (currently-active) account's snapshot so it keeps
@@ -1051,14 +1053,12 @@ class Controller:
                 pass  # best-effort
 
         # Clear the live session so Riot opens a fresh login screen (NOT "Sign out").
-        self._post_status("Sitzung wird zurückgesetzt…")
+        self._post_status("status.recapture_resetting")
         riot_client.clear_session()
 
         riot_exe = riot_client.find_riot_client_exe()
         if riot_exe is None:
-            self._post_error(
-                "Riot Client nicht gefunden — bitte manuell starten und einloggen."
-            )
+            self._post_error("status.recapture_not_found")
             return
         riot_client.start(riot_exe)
 
@@ -1088,7 +1088,8 @@ class Controller:
         # (a double rebuild destroys/recreates every card twice and flickers; WR-05).
         self._set_status(
             SwitchStatus.IDLE,
-            f"Fertig — {target.display_name} ist aktiv.",
+            "status.done_active",
+            name=target.display_name,
         )
         # Phase 2: trigger rank refresh after switch (D-23 Trigger 2)
         self._trigger_rank_refresh()
@@ -1132,21 +1133,16 @@ class Controller:
             valid = rank_service.validate_api_key(key)
         except rank_service.RiotAPIError as exc:
             # 429/5xx — transient Riot-side error, not a verdict on the key itself.
-            raise ValueError(
-                f"API-Fehler beim Prüfen des Keys ({exc.status_code}). "
-                "Bitte später erneut versuchen."
-            ) from exc
+            raise ValueError(_translate_riot_error(exc)) from exc
         except requests.exceptions.RequestException as exc:
-            raise ValueError(
-                "Netzwerkfehler beim Prüfen des API-Keys. Bitte erneut versuchen."
-            ) from exc
+            raise ValueError(i18n.t("error.api_key_network")) from exc
 
         if not valid:
-            raise ValueError("API-Key ungültig oder abgelaufen.")
+            raise ValueError(i18n.t("error.api_key_invalid"))
 
         credential_store.save_api_key(key)
         self._api_key_warning = False  # D-09: a freshly validated key clears the hint
-        self._set_status(SwitchStatus.IDLE, "API-Key gespeichert.")
+        self._set_status(SwitchStatus.IDLE, "status.api_key_saved")
         # Trigger immediate rank refresh now that a key is available (D-08 / D-23 Trigger 1)
         self._trigger_rank_refresh()
 
@@ -1207,6 +1203,28 @@ class Controller:
         """
         self.state.disable_gpu = not enabled
         config.save_state(self.state)
+
+    def set_language(self, lang: str) -> None:
+        """Switch the active UI language live, persist it, and push state (ONBOARD-04).
+
+        Plan 08-05 (D-15/D-16): sets ``gui.i18n``'s module-level current
+        language so every subsequent Python-originated status/error message
+        resolves in the new language starting with the very next message
+        (D-16 — Python side has no history to re-translate). Persists the
+        choice to ``accounts.json`` so it survives a restart (overriding the
+        first-run System-Locale default from then on), and pushes state so
+        ``app.js``'s ``applyLanguage()`` re-renders the whole UI immediately.
+
+        Args:
+            lang: Language code, e.g. "de" or "en". No validation is
+                performed (mirrors ``gui.i18n.set_language``'s own
+                never-raises contract) — an unrecognized code simply
+                resolves every key to its raw-key fallback.
+        """
+        i18n.set_language(lang)
+        self.state.language = lang
+        config.save_state(self.state)
+        self._push_state()
 
     # ------------------------------------------------------------------
     # Phase 2 — Rank fetch orchestration (D-23/D-24/D-27/D-28)
@@ -1367,9 +1385,13 @@ class Controller:
 
         # T-02-12: surface key-invalid message on 401/403 only (key value never included)
         if isinstance(exc, rank_service.RiotAPIError) and exc.status_code in (401, 403):
-            self.state.status_message = (
-                "API-Key ungültig oder abgelaufen. Bitte in den Einstellungen prüfen."
-            )
+            # Plan 08-05 (ONBOARD-04): set the key+params contract directly
+            # (not via _set_status, which would also change SwitchStatus —
+            # rank errors stay silent per UI-SPEC) so window.state.status_key
+            # AND status_message both reflect the current-language text.
+            self._status_key = "status.api_key_invalid"
+            self._status_params = {}
+            self.state.status_message = i18n.t("status.api_key_invalid")
             # Note: we do NOT change SwitchStatus here (rank errors are silent per UI-SPEC)
             # Plan 08-04 (D-09): also set the PERSISTENT header hint (unlike
             # status_message, which is transient and gets overwritten by other
@@ -1424,38 +1446,53 @@ class Controller:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _set_status(self, status: SwitchStatus, message: str) -> None:
-        """Update AppState status and message, then push to JS layer.
+    def _set_status(self, status: SwitchStatus, key: str, **params) -> None:
+        """Update AppState status and message (key+params contract), then push to JS.
+
+        Plan 08-05 (ONBOARD-04, D-15/D-16): *key* is a dotted ``strings.json``
+        key (e.g. ``"status.killing_client"``), not pre-formatted text.
+        Resolves the current-language text via ``gui.i18n.t()`` into
+        ``state.status_message`` for any legacy direct reader, while
+        ``_status_key``/``_status_params`` (mirrored to ``window.state`` by
+        ``_push_state``) let ``app.js`` re-resolve the very same key live
+        when the user switches languages — no restart needed.
 
         Thread-safe: only mutates AppState + calls _push_state (window.state),
         the pywebview-documented cross-thread channel.  May be called from any
         thread.
 
         Args:
-            status:  The new ``SwitchStatus`` enum value.
-            message: The German status text shown in the status bar.
+            status: The new ``SwitchStatus`` enum value.
+            key:    Dotted ``strings.json`` key (e.g. "status.killing_client"),
+                    or "" for no message.
+            **params: Values substituted into the resolved template's
+                    ``{placeholder}``s (e.g. ``name=target.display_name``).
         """
         self.state.status = status
-        self.state.status_message = message
+        self._status_key = key
+        self._status_params = params
+        self.state.status_message = i18n.t(key, **params)
         self._push_state()
 
-    def _post_status(self, message: str) -> None:
-        """Post a SWITCHING status update from a background thread.
+    def _post_status(self, key: str, **params) -> None:
+        """Post a SWITCHING status update (key+params) from a background thread.
 
         Direct call — no main-thread dispatch needed (window.state is the
         cross-thread channel, no tkinter required).
 
         Args:
-            message: The German step text to show in the status bar.
+            key: Dotted ``strings.json`` key for the step text.
+            **params: Values substituted into the resolved template.
         """
-        self._set_status(SwitchStatus.SWITCHING, message)
+        self._set_status(SwitchStatus.SWITCHING, key, **params)
 
-    def _post_error(self, message: str) -> None:
-        """Post an ERROR status update from a background thread.
+    def _post_error(self, key: str, **params) -> None:
+        """Post an ERROR status update (key+params) from a background thread.
 
         Direct call — no main-thread dispatch needed.
 
         Args:
-            message: The German error text to show in the status bar.
+            key: Dotted ``strings.json`` key for the error text.
+            **params: Values substituted into the resolved template.
         """
-        self._set_status(SwitchStatus.ERROR, message)
+        self._set_status(SwitchStatus.ERROR, key, **params)
