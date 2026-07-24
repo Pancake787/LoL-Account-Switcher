@@ -15,6 +15,27 @@ APP_DIR: pathlib.Path = pathlib.Path(os.environ["APPDATA"]) / "LoLSwitcher"
 ACCOUNTS_JSON: pathlib.Path = APP_DIR / "accounts.json"
 SESSIONS_DIR: pathlib.Path = APP_DIR / "sessions"
 
+# ---------------------------------------------------------------------------
+# Region migration (REGION-02, D-12) — Phase 8
+# ---------------------------------------------------------------------------
+
+#: Legacy pre-Phase-8 region strings (bare "EUW"/"EUNE", no numeral suffix) mapped
+#: to their canonical Riot platform ids. "EUNE" -> "EUN1" is the load-bearing,
+#: easy-to-miss case (Pitfall 2) — a generic .upper() pass would NOT catch it.
+_LEGACY_REGION_ALIASES: dict[str, str] = {"EUW": "EUW1", "EUNE": "EUN1"}
+
+
+def _normalize_region(raw: str) -> str:
+    """Normalize a region string to a canonical Riot platform id.
+
+    Legacy values ("EUW", "EUNE") are silently migrated to canonical platform
+    ids ("EUW1", "EUN1") on load — D-12: no dialog, no user-visible step, only
+    a test-covered in-memory upgrade. Any other value is upper-cased as-is;
+    whitelist enforcement against the canonical id set happens at the
+    controller entry points (Plan 08-03), not here.
+    """
+    return _LEGACY_REGION_ALIASES.get(raw.upper(), raw.upper())
+
 
 def snapshot_dir(username: str) -> pathlib.Path:
     """Return the snapshot directory for a given Riot username.
@@ -68,7 +89,8 @@ def _state_from_json(raw: str) -> AppState:
         # Phase 2 additions — defensive .get() with defaults so Phase-1
         # accounts.json (which lacks these keys) loads without error.
         riot_id = entry.get("riot_id") or None
-        region = entry.get("region", "EUW")
+        # REGION-02/D-12: legacy "EUW"/"EUNE" silently migrate to "EUW1"/"EUN1".
+        region = _normalize_region(entry.get("region", "EUW1"))
         puuid = entry.get("puuid") or None
         rank_cache = entry.get("rank_cache") or None
         rank_cache_ts = entry.get("rank_cache_ts") or None
@@ -84,7 +106,26 @@ def _state_from_json(raw: str) -> AppState:
         ))
 
     active_username = data.get("active_username") or None
-    return AppState(accounts=accounts, active_username=active_username)
+
+    # Phase 8 additions — app-wide settings fields, read at the top level (not
+    # per-account), mirroring the active_username default-handling above.
+    # Defensive .get() with defaults so pre-Phase-8 accounts.json (lacking
+    # these keys entirely) loads without error.
+    language = data.get("language") or None
+    update_check_enabled = bool(data.get("update_check_enabled", True))
+    dismissed_update_version = data.get("dismissed_update_version") or None
+    disable_gpu = bool(data.get("disable_gpu", True))
+    update_last_checked = float(data.get("update_last_checked", 0.0) or 0.0)
+
+    return AppState(
+        accounts=accounts,
+        active_username=active_username,
+        language=language,
+        update_check_enabled=update_check_enabled,
+        dismissed_update_version=dismissed_update_version,
+        disable_gpu=disable_gpu,
+        update_last_checked=update_last_checked,
+    )
 
 
 def _try_load(path: pathlib.Path) -> AppState | None:
@@ -163,6 +204,13 @@ def save_state(state: AppState) -> None:
             for account in state.accounts
         ],
         "active_username": state.active_username,
+        # Phase 8 additions — app-wide settings, flat primitives (T-02-09: never
+        # write secrets; the API key lives only in keyring/DPAPI, never here).
+        "language": state.language,
+        "update_check_enabled": state.update_check_enabled,
+        "dismissed_update_version": state.dismissed_update_version,
+        "disable_gpu": state.disable_gpu,
+        "update_last_checked": state.update_last_checked,
     }
 
     payload = json.dumps(data, ensure_ascii=False, indent=2)
