@@ -103,6 +103,14 @@ class Controller:
         #: Ephemeral, like _client_running/_api_key_warning — never persisted.
         self._status_key: Optional[str] = None
         self._status_params: dict = {}
+        #: Plan 08-06 (ONBOARD-03, D-13/D-14): ephemeral update-pill state, set
+        #: by start_update_check()'s background worker when a newer,
+        #: non-dismissed release exists. Never persisted — only the throttle
+        #: marker (state.update_last_checked) and the dismissed tag
+        #: (state.dismissed_update_version) survive a restart.
+        self._update_available: bool = False
+        self._update_tag: Optional[str] = None
+        self._update_url: Optional[str] = None
         #: Set by webview_window.start() after construction; stopped centrally
         #: in shutdown() (WR-03). None when no poller was wired (e.g. headless/tests).
         self._status_poller = None
@@ -249,6 +257,10 @@ class Controller:
         window.state.status_key = self._status_key
         window.state.status_params = self._status_params
         window.state.language = self.state.language
+        # Plan 08-06 (ONBOARD-03): update-pill state (D-13/D-14).
+        window.state.update_available = self._update_available
+        window.state.update_tag = self._update_tag
+        window.state.update_url = self._update_url
 
     def update_client_status(self, client_running: bool, game_live: bool) -> None:
         """Handle a status transition from StatusPoller.on_change (STATUS-01/D-17).
@@ -1224,6 +1236,82 @@ class Controller:
         i18n.set_language(lang)
         self.state.language = lang
         config.save_state(self.state)
+        self._push_state()
+
+    # ------------------------------------------------------------------
+    # Update check (ONBOARD-03, Plan 08-06, D-13/D-14)
+    # ------------------------------------------------------------------
+
+    def start_update_check(self) -> None:
+        """Kick off a single throttled background update check (D-13/D-14).
+
+        No-op when the user has disabled the check in Settings
+        (``state.update_check_enabled`` — D-07). Otherwise spawns a daemon
+        thread running ``_run_update_check`` (mirrors the ``_trigger_rank_refresh``
+        daemon-thread idiom). Called once from ``js_api.on_webview_ready``, after
+        the initial state push + rank-refresh timer start.
+        """
+        if not self.state.update_check_enabled:
+            return
+        threading.Thread(target=self._run_update_check, daemon=True).start()
+
+    def _run_update_check(self) -> None:
+        """Background worker for ``start_update_check`` (daemon thread only).
+
+        Locally imports ``update_checker`` (deferred import — this module must
+        never be imported from the headless CLI path; the controller itself is
+        GUI-path-only, but the local import keeps that boundary explicit and
+        mirrors the js_api/status_poller local-import discipline). Advances +
+        persists the 24h TTL throttle marker when it was due (Pitfall 4 — the
+        app-level TTL is the real throttle, not ETag/304). When a result exists
+        whose tag differs from the persisted dismissed version, sets the
+        ephemeral pill state and pushes it (D-13); a tag equal to the dismissed
+        version stays silent (D-14). Silent on every failure path —
+        ``check_for_update`` itself never raises.
+        """
+        import update_checker  # deferred: keeps update_checker off the CLI import path
+
+        result = update_checker.check_for_update(
+            update_checker.APP_VERSION, self.state.update_last_checked
+        )
+        if time.time() - self.state.update_last_checked >= update_checker.CHECK_TTL_S:
+            self.state.update_last_checked = time.time()
+            config.save_state(self.state)
+
+        if result and result.get("tag_name") != self.state.dismissed_update_version:
+            self._update_available = True
+            self._update_tag = result.get("tag_name")
+            self._update_url = result.get("html_url")
+            self._push_state()
+
+    def dismiss_update(self, version: str) -> None:
+        """Persist the dismissed version and hide the pill (D-14).
+
+        The pill stays hidden for this exact ``version`` tag until a
+        strictly-newer release is found on a future throttled check.
+
+        Args:
+            version: The release tag being dismissed (e.g. "v2.2.0").
+        """
+        self.state.dismissed_update_version = version
+        config.save_state(self.state)
+        self._update_available = False
+        self._push_state()
+
+    def set_update_check(self, enabled: bool) -> None:
+        """Persist the update-check enable/disable toggle (D-07/D-14).
+
+        Disabling immediately clears any currently-shown pill — Settings
+        should feel authoritative rather than leaving stale pill state visible
+        after the user just turned the check off.
+
+        Args:
+            enabled: True to enable the throttled background check.
+        """
+        self.state.update_check_enabled = enabled
+        config.save_state(self.state)
+        if not enabled:
+            self._update_available = False
         self._push_state()
 
     # ------------------------------------------------------------------

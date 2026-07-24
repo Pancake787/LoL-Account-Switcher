@@ -5,6 +5,7 @@ GitHub API.
 """
 from __future__ import annotations
 
+import pathlib
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -127,6 +128,245 @@ class TestCheckForUpdateFailureModes(unittest.TestCase):
             update_checker.check_for_update("2.1.0", self._elapsed_ts())
         _args, kwargs = mock_get.call_args
         self.assertNotIn("headers", kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Controller integration tests (Plan 08-06, ONBOARD-03, D-13/D-14)
+#
+# NOTE: deliberately does NOT install its own fake keyring module or call
+# importlib.reload(credential_store) — this file is collected LAST
+# alphabetically (after test_rank_flow.py, which already reloads
+# credential_store onto its own fake keyring at collection time). Doing the
+# same reload here would silently rebind credential_store's module-level
+# `keyring` name for every OTHER already-collected test file for the rest of
+# the pytest session (all test modules share one process), desyncing their
+# own fake-keyring instances from the one credential_store actually calls —
+# exactly the cross-file binding hazard documented in test_settings.py's
+# _make_controller_ctx. Because some earlier-collected file (test_account_mgmt.py
+# / test_rank_flow.py) has ALREADY installed a fake keyring backend by the time
+# this file is collected, `credential_store` is safe to import here as-is; state
+# is reset via the real credential_store API (delete_api_key/delete_api_key_file),
+# which writes through to whichever fake backend is currently bound.
+# ---------------------------------------------------------------------------
+
+import config  # noqa: E402
+import credential_store  # noqa: E402
+import controller as controller_module  # noqa: E402
+
+
+class _FakeWindowState:
+    """Attribute sink for window.state.* writes — accepts any attribute."""
+
+
+class _FakeWindow:
+    def __init__(self) -> None:
+        self.state = _FakeWindowState()
+
+
+class TestControllerUpdateCheck(unittest.TestCase):
+    """Controller-level integration tests for start_update_check/dismiss_update/
+    set_update_check (Plan 08-06). ``update_checker.check_for_update`` is always
+    mocked — never a real network call."""
+
+    def _make_controller(self, tmp_path: pathlib.Path):
+        fake_window = _FakeWindow()
+        patcher_app = patch.object(config, "APP_DIR", tmp_path)
+        patcher_json = patch.object(config, "ACCOUNTS_JSON", tmp_path / "accounts.json")
+        patcher_sessions = patch.object(config, "SESSIONS_DIR", tmp_path / "sessions")
+        patcher_app.start()
+        patcher_json.start()
+        patcher_sessions.start()
+        config.ensure_dirs()
+        credential_store.delete_api_key()
+        credential_store.delete_api_key_file()
+        ctrl = controller_module.Controller(fake_window)
+        ctrl._fake_window = fake_window
+        self._ctrls.append(ctrl)
+        return ctrl, [patcher_app, patcher_json, patcher_sessions]
+
+    def setUp(self) -> None:
+        self._ctrls = []
+
+    def tearDown(self) -> None:
+        for ctrl in self._ctrls:
+            ctrl.shutdown()
+
+    def test_disabled_does_not_spawn_check_thread(self) -> None:
+        """update_check_enabled=False -> start_update_check() spawns no thread
+        and never touches check_for_update; no pill state is set."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.update_check_enabled = False
+                with patch("threading.Thread") as mock_thread_cls:
+                    ctrl.start_update_check()
+                    mock_thread_cls.assert_not_called()
+                self.assertFalse(ctrl._update_available)
+                self.assertIsNone(ctrl._update_tag)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_enabled_spawns_daemon_thread(self) -> None:
+        """update_check_enabled=True -> start_update_check() spawns exactly one
+        daemon thread targeting _run_update_check."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.update_check_enabled = True
+                with patch("threading.Thread") as mock_thread_cls:
+                    mock_t = MagicMock()
+                    mock_thread_cls.return_value = mock_t
+                    ctrl.start_update_check()
+                    mock_thread_cls.assert_called_once()
+                    _args, kwargs = mock_thread_cls.call_args
+                    self.assertEqual(kwargs.get("target"), ctrl._run_update_check)
+                    self.assertTrue(kwargs.get("daemon"))
+                    mock_t.start.assert_called_once()
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_newer_non_dismissed_result_sets_pill_state(self) -> None:
+        """A mocked newer release (not the dismissed tag) sets update_available/
+        update_tag/update_url and pushes them to window.state."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.dismissed_update_version = None
+                ctrl.state.update_last_checked = 0.0
+                with patch(
+                    "update_checker.check_for_update",
+                    return_value={
+                        "tag_name": "v2.2.0",
+                        "html_url": "https://github.com/x/releases/v2.2.0",
+                    },
+                ):
+                    ctrl._run_update_check()
+
+                self.assertTrue(ctrl._update_available)
+                self.assertEqual(ctrl._update_tag, "v2.2.0")
+                self.assertEqual(
+                    ctrl._update_url, "https://github.com/x/releases/v2.2.0"
+                )
+                self.assertTrue(ctrl._fake_window.state.update_available)
+                self.assertEqual(ctrl._fake_window.state.update_tag, "v2.2.0")
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_result_matching_dismissed_version_stays_hidden(self) -> None:
+        """A mocked result whose tag equals dismissed_update_version never sets
+        update_available (D-14)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.dismissed_update_version = "v2.2.0"
+                ctrl.state.update_last_checked = 0.0
+                with patch(
+                    "update_checker.check_for_update",
+                    return_value={
+                        "tag_name": "v2.2.0",
+                        "html_url": "https://github.com/x/releases/v2.2.0",
+                    },
+                ):
+                    ctrl._run_update_check()
+
+                self.assertFalse(ctrl._update_available)
+                self.assertIsNone(ctrl._update_tag)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_no_result_leaves_pill_hidden(self) -> None:
+        """check_for_update returning None (silent failure/no-update) leaves
+        the pill hidden."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.update_last_checked = 0.0
+                with patch("update_checker.check_for_update", return_value=None):
+                    ctrl._run_update_check()
+                self.assertFalse(ctrl._update_available)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_run_update_check_advances_throttle_marker_when_due(self) -> None:
+        """_run_update_check persists a fresh update_last_checked when the TTL
+        window had elapsed (Pitfall 4 — app-level TTL is the real throttle)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.state.update_last_checked = 0.0
+                with patch("update_checker.check_for_update", return_value=None):
+                    ctrl._run_update_check()
+                self.assertGreater(ctrl.state.update_last_checked, 0.0)
+                reloaded = config.load_state()
+                self.assertGreater(reloaded.update_last_checked, 0.0)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_dismiss_update_persists_and_clears_pill(self) -> None:
+        """dismiss_update(version) persists dismissed_update_version (config
+        round-trip) and clears the pill."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl._update_available = True
+                ctrl._update_tag = "v2.2.0"
+                ctrl.dismiss_update("v2.2.0")
+
+                self.assertFalse(ctrl._update_available)
+                self.assertEqual(ctrl.state.dismissed_update_version, "v2.2.0")
+                reloaded = config.load_state()
+                self.assertEqual(reloaded.dismissed_update_version, "v2.2.0")
+                self.assertFalse(ctrl._fake_window.state.update_available)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_set_update_check_false_persists_and_clears_pill(self) -> None:
+        """set_update_check(False) persists update_check_enabled=False and
+        clears any shown pill."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl._update_available = True
+                ctrl.set_update_check(False)
+
+                self.assertFalse(ctrl.state.update_check_enabled)
+                self.assertFalse(ctrl._update_available)
+                reloaded = config.load_state()
+                self.assertFalse(reloaded.update_check_enabled)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_set_update_check_true_persists(self) -> None:
+        """set_update_check(True) persists update_check_enabled=True."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller(pathlib.Path(tmp))
+            try:
+                ctrl.set_update_check(False)
+                ctrl.set_update_check(True)
+
+                self.assertTrue(ctrl.state.update_check_enabled)
+                reloaded = config.load_state()
+                self.assertTrue(reloaded.update_check_enabled)
+            finally:
+                for p in patchers:
+                    p.stop()
 
 
 if __name__ == "__main__":

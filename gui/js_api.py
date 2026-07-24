@@ -303,6 +303,28 @@ class JsApi:
         """
         self._controller.set_language(lang)
 
+    def set_update_check(self, enabled: bool) -> None:
+        """Persist the update-check enable/disable toggle (Plan 08-06, D-07/D-14).
+
+        Thin delegate — persistence and the pill-clearing state push live in
+        ``controller.set_update_check`` (T-04-05 bridge guard).
+
+        Args:
+            enabled: True to enable the throttled background check.
+        """
+        self._controller.set_update_check(enabled)
+
+    def dismiss_update(self, version: str) -> None:
+        """Dismiss the update pill for a specific version (Plan 08-06, D-14).
+
+        Thin delegate — persistence of the dismissed tag and the state push
+        live in ``controller.dismiss_update`` (T-04-05 bridge guard).
+
+        Args:
+            version: The release tag being dismissed (e.g. "v2.2.0").
+        """
+        self._controller.dismiss_update(version)
+
     def get_settings(self) -> dict:
         """Return the current app-wide settings for the Settings modal.
 
@@ -357,6 +379,9 @@ class JsApi:
         """
         self._controller._push_state()
         self._controller._schedule_rank_refresh_timer()
+        # Plan 08-06 (ONBOARD-03, D-13/D-14): kick off the throttled background
+        # update check. No-op when disabled in Settings; silent on any failure.
+        self._controller.start_update_check()
 
     # ------------------------------------------------------------------
     # Internal helpers
