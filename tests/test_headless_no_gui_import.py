@@ -147,16 +147,17 @@ class TestHeadlessNoGuiImport(unittest.TestCase):
             cwd=".",
             timeout=30,
         )
-        # -X importtime writes to stderr; check no forbidden module appears
-        importtime_output = result.stderr.lower()
+        # -X importtime writes to stderr; each line ends in the dotted module name:
+        # "import time:  <self ns> | <cumulative ns> | <module>"
+        imported = set()
+        for line in result.stderr.lower().splitlines():
+            if "|" in line:
+                imported.add(line.rsplit("|", 1)[1].strip())
         for mod in _FORBIDDEN_MODULES:
-            # importtime lines look like: "import time:  <ns> | <cumulative ns> |  <module>"
-            # We search for the bare module name surrounded by whitespace/pipe
-            normalized = mod.replace(".", "/")
-            self.assertNotIn(
-                mod.replace(".", "_"),  # e.g. gui_webview_window
-                importtime_output,
-                f"Module '{mod}' appears to have been imported in the switch branch (importtime).",
+            hits = [m for m in imported if m == mod or m.startswith(mod + ".")]
+            self.assertFalse(
+                hits,
+                f"Module '{mod}' was imported in the switch branch (importtime): {hits}",
             )
 
 

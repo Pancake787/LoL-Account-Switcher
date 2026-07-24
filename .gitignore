@@ -35,6 +35,7 @@ riot_api_key.txt
 *.yml
 !.pre-commit-config.yaml
 !.github/workflows/*.yml
+!.github/workflows/*.yaml
 
 # App data that must never be committed
 accounts.json
