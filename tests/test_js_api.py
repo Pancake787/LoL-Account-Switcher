@@ -200,5 +200,82 @@ class TestRecaptureSession(unittest.TestCase):
         self.assertIsNone(result)
 
 
+# ---------------------------------------------------------------------------
+# D-11 region-badge data source (Plan 08-03 Task 2): the card() region badge
+# reads acc.region from the controller-serialized account dict — verify it
+# is present and holds a canonical platform id.
+# ---------------------------------------------------------------------------
+
+class _FakeControllerWindowState:
+    """Minimal pywebview window.state stub — supports attribute assignment."""
+
+    def __init__(self):
+        self.accounts = None
+        self.active_username = None
+        self.status = None
+        self.status_message = None
+        self.pending_first_login = None
+
+
+class _FakeControllerWindow:
+    """Minimal pywebview Window stub (mirrors test_controller_decouple.FakeWindow)."""
+
+    def __init__(self):
+        self.state = _FakeControllerWindowState()
+
+    def minimize(self):
+        pass
+
+    def maximize(self):
+        pass
+
+    def destroy(self):
+        pass
+
+
+class TestSerializeAccountsRegionField(unittest.TestCase):
+    """_serialize_accounts() must expose a canonical `region` value for every
+    account — the sole data source for app.js's region-badge (D-11)."""
+
+    def _make_controller(self, region: str):
+        import importlib
+        from unittest.mock import patch
+        import controller as ctrl_module
+        from models import Account, AppState
+
+        window = _FakeControllerWindow()
+        with patch("config.load_state") as mock_load, \
+             patch("config.ensure_dirs"), \
+             patch.object(ctrl_module.Controller, "_schedule_accounts_poll"):
+            mock_load.return_value = AppState(accounts=[
+                Account(
+                    username="kruser",
+                    display_name="KR Smurf",
+                    has_snapshot=False,
+                    region=region,
+                ),
+            ])
+            return ctrl_module.Controller(root=window)
+
+    def test_serialized_region_is_present_and_canonical(self) -> None:
+        """A KR account serializes with region="KR" — a real PLATFORM_TO_REGIONAL key."""
+        import rank_service
+        ctrl = self._make_controller("KR")
+        result = ctrl._serialize_accounts()
+        self.assertEqual(len(result), 1)
+        self.assertIn("region", result[0])
+        self.assertEqual(result[0]["region"], "KR")
+        self.assertIn(result[0]["region"], rank_service.PLATFORM_TO_REGIONAL)
+
+    def test_serialized_region_survives_for_migrated_euw1_account(self) -> None:
+        """A migrated EUW1 account (post config._normalize_region) still serializes
+        its canonical region unchanged — no regression for existing users (D-12)."""
+        import rank_service
+        ctrl = self._make_controller("EUW1")
+        result = ctrl._serialize_accounts()
+        self.assertEqual(result[0]["region"], "EUW1")
+        self.assertIn(result[0]["region"], rank_service.PLATFORM_TO_REGIONAL)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -394,7 +394,7 @@ function card(acc, activeUsername, switching) {
         <span class="drag-handle" title="Verschieben">&#8801;</span>
         <div class="who">
           <div class="name-row"><span class="name">${esc(acc.display_name)}</span>${statusPill}</div>
-          <div class="ign">${esc(ign)}</div>
+          <div class="ign">${esc(ign)} <span class="region-badge">${esc(acc.region)}</span></div>
           ${sessionWarningHtml}
         </div>
       </div>

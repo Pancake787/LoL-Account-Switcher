@@ -166,6 +166,8 @@
   .who .name-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .who .name{font-family:var(--font-disp);font-weight:600;font-size:17px;letter-spacing:.01em}
   .who .ign{font-size:13px;color:var(--text-2);margin-top:2px}
+  /* D-11: dezentes Region-Kürzel neben der Riot-ID — reuses .rank .queue's muted small-caps look (no new token) */
+  .region-badge{font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--text-3);font-weight:600}
 
   /* ---- Per-account "session possibly expired" hint (D-21, SESSION-01) ---- */
   /* Subtle/informational — deliberately NOT error-red and NOT the header
@@ -462,8 +464,21 @@
     <div class="modal-field">
       <label for="add-region">Region</label>
       <select id="add-region">
-        <option value="EUW">EUW</option>
-        <option value="EUNE">EUNE</option>
+        <option value="EUW1">EUW — EU West</option>
+        <option value="EUN1">EUNE — EU Nordost</option>
+        <option value="BR1">BR — Brazil</option>
+        <option value="JP1">JP — Japan</option>
+        <option value="KR">KR — Korea</option>
+        <option value="LA1">LAN — Latin America North</option>
+        <option value="LA2">LAS — Latin America South</option>
+        <option value="ME1">ME — Middle East</option>
+        <option value="NA1">NA — North America</option>
+        <option value="OC1">OCE — Oceania</option>
+        <option value="RU">RU — Russia</option>
+        <option value="SG2">SEA — Southeast Asia</option>
+        <option value="TW2">TW — Taiwan</option>
+        <option value="TR1">TR — Turkey</option>
+        <option value="VN2">VN — Vietnam</option>
       </select>
     </div>
     <div class="modal-error" id="add-account-error"></div>
@@ -502,8 +517,21 @@
     <div class="modal-field">
       <label for="edit-region">Region</label>
       <select id="edit-region">
-        <option value="EUW">EUW</option>
-        <option value="EUNE">EUNE</option>
+        <option value="EUW1">EUW — EU West</option>
+        <option value="EUN1">EUNE — EU Nordost</option>
+        <option value="BR1">BR — Brazil</option>
+        <option value="JP1">JP — Japan</option>
+        <option value="KR">KR — Korea</option>
+        <option value="LA1">LAN — Latin America North</option>
+        <option value="LA2">LAS — Latin America South</option>
+        <option value="ME1">ME — Middle East</option>
+        <option value="NA1">NA — North America</option>
+        <option value="OC1">OCE — Oceania</option>
+        <option value="RU">RU — Russia</option>
+        <option value="SG2">SEA — Southeast Asia</option>
+        <option value="TW2">TW — Taiwan</option>
+        <option value="TR1">TR — Turkey</option>
+        <option value="VN2">VN — Vietnam</option>
       </select>
     </div>
     <input type="hidden" id="edit-riot-id-username">
