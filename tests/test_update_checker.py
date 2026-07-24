@@ -133,25 +133,66 @@ class TestCheckForUpdateFailureModes(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Controller integration tests (Plan 08-06, ONBOARD-03, D-13/D-14)
 #
-# NOTE: deliberately does NOT install its own fake keyring module or call
-# importlib.reload(credential_store) — this file is collected LAST
-# alphabetically (after test_rank_flow.py, which already reloads
-# credential_store onto its own fake keyring at collection time). Doing the
-# same reload here would silently rebind credential_store's module-level
-# `keyring` name for every OTHER already-collected test file for the rest of
-# the pytest session (all test modules share one process), desyncing their
-# own fake-keyring instances from the one credential_store actually calls —
-# exactly the cross-file binding hazard documented in test_settings.py's
-# _make_controller_ctx. Because some earlier-collected file (test_account_mgmt.py
-# / test_rank_flow.py) has ALREADY installed a fake keyring backend by the time
-# this file is collected, `credential_store` is safe to import here as-is; state
-# is reset via the real credential_store API (delete_api_key/delete_api_key_file),
-# which writes through to whichever fake backend is currently bound.
+# credential_store's module-level `keyring` name is bound at whatever module
+# first imports it in this process. When a sibling test file (e.g.
+# test_account_mgmt.py / test_rank_flow.py) is collected before this one (the
+# common full-suite case), credential_store is ALREADY safely bound to that
+# file's fake keyring by the time we get here — reloading it again here would
+# silently rebind it for every already-collected file for the rest of the
+# session (all test modules share one process), desyncing their own
+# fake-keyring instances from the one credential_store actually calls (the
+# cross-file hazard documented in test_settings.py's _make_controller_ctx).
+# But when THIS file happens to be collected FIRST (e.g. an explicit subset
+# run such as `pytest tests/test_update_checker.py tests/test_settings.py`,
+# collected in CLI order), nobody has installed a fake yet and
+# credential_store would otherwise bind to the REAL Windows keyring package —
+# never acceptable in this suite. Detect that case (the real package exposes
+# `get_keyring`; no fake in this suite does) and only then install our own
+# fake + reload, so this file is hermetic in isolation AND never disturbs an
+# already-installed sibling fake.
 # ---------------------------------------------------------------------------
 
 import config  # noqa: E402
 import credential_store  # noqa: E402
 import controller as controller_module  # noqa: E402
+
+if hasattr(getattr(credential_store, "keyring", None), "get_keyring"):
+    import importlib
+    import sys
+    import types
+
+    class _FakeKeyringErrors:
+        class PasswordDeleteError(Exception):
+            pass
+
+    class _FakeKeyring:
+        def __init__(self):
+            self._store: dict[tuple[str, str], str] = {}
+            self.errors = _FakeKeyringErrors()
+
+        def set_password(self, service, username, password):
+            self._store[(service, username)] = password
+
+        def get_password(self, service, username):
+            return self._store.get((service, username))
+
+        def delete_password(self, service, username):
+            key = (service, username)
+            if key not in self._store:
+                raise _FakeKeyringErrors.PasswordDeleteError(f"{service}/{username} not found")
+            del self._store[key]
+
+    _fake_keyring = _FakeKeyring()
+    _keyring_mod = types.ModuleType("keyring")
+    _keyring_mod.set_password = _fake_keyring.set_password
+    _keyring_mod.get_password = _fake_keyring.get_password
+    _keyring_mod.delete_password = _fake_keyring.delete_password
+    _keyring_errors_mod = types.ModuleType("keyring.errors")
+    _keyring_errors_mod.PasswordDeleteError = _FakeKeyringErrors.PasswordDeleteError
+    _keyring_mod.errors = _keyring_errors_mod
+    sys.modules["keyring"] = _keyring_mod
+    sys.modules["keyring.errors"] = _keyring_errors_mod
+    importlib.reload(credential_store)
 
 
 class _FakeWindowState:
