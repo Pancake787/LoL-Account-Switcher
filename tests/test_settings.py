@@ -458,6 +458,70 @@ class TestControllerApiKeySettings(unittest.TestCase):
                 for p in patchers:
                     p.stop()
 
+    def test_set_update_check_persists(self) -> None:
+        """set_update_check(False) -> update_check_enabled=False persisted
+        (config round-trip); set_update_check(True) -> back to True (Plan 08-06,
+        D-07/D-14)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                ctrl.set_update_check(False)
+                self.assertFalse(ctrl.state.update_check_enabled)
+                reloaded = config.load_state()
+                self.assertFalse(reloaded.update_check_enabled)
+
+                ctrl.set_update_check(True)
+                self.assertTrue(ctrl.state.update_check_enabled)
+                reloaded2 = config.load_state()
+                self.assertTrue(reloaded2.update_check_enabled)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+
+# ---------------------------------------------------------------------------
+# Plan 08-06 Task 2 — content-grep gates for the update-pill markup/wiring.
+#
+# Regression guard: catches an accidental removal of the pill markup or its
+# JS wiring that unit tests alone (no real browser/webview in this suite)
+# cannot otherwise exercise. Mirrors test_i18n.py's TestJsWiringContentGates.
+# ---------------------------------------------------------------------------
+
+class TestUpdatePillContentGates(unittest.TestCase):
+    """Content-grep gates for the header update pill (ONBOARD-03, D-13/D-14)."""
+
+    _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+    def _app_js_text(self) -> str:
+        return (self._REPO_ROOT / "gui" / "assets" / "app.js").read_text(encoding="utf-8")
+
+    def _index_html_text(self) -> str:
+        return (self._REPO_ROOT / "gui" / "assets" / "index.html").read_text(encoding="utf-8")
+
+    def test_index_html_has_update_pill_once(self) -> None:
+        self.assertEqual(self._index_html_text().count('id="update-pill"'), 1)
+
+    def test_index_html_update_pill_reuses_mint_token(self) -> None:
+        """No new color token invented — reuses the existing .client-status.running
+        mint rgba(34,224,192...) variant (STYLE-REFERENCE)."""
+        self.assertGreaterEqual(self._index_html_text().count("rgba(34,224,192"), 1)
+
+    def test_app_js_has_render_update_pill(self) -> None:
+        self.assertIn("renderUpdatePill", self._app_js_text())
+
+    def test_app_js_calls_render_update_pill_from_render(self) -> None:
+        self.assertIn("renderUpdatePill(state)", self._app_js_text())
+
+    def test_app_js_wires_open_external_url_for_pill(self) -> None:
+        self.assertIn("open_external_url", self._app_js_text())
+
+    def test_app_js_wires_dismiss_update(self) -> None:
+        self.assertIn("dismiss_update", self._app_js_text())
+
+    def test_app_js_wires_set_update_check(self) -> None:
+        self.assertIn("set_update_check", self._app_js_text())
+
 
 if __name__ == "__main__":
     unittest.main()

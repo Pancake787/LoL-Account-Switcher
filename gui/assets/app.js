@@ -835,6 +835,37 @@ document.addEventListener('keydown', function (e) {
     });
   }
 
+  // Plan 08-06 (D-07/D-14): update-check Settings toggle
+  const settingsUpdateCheck = document.getElementById('settings-update-check');
+  if (settingsUpdateCheck) {
+    settingsUpdateCheck.addEventListener('change', () => {
+      pywebview.api.set_update_check(settingsUpdateCheck.checked)
+        .catch(err => console.error('[app.js] set_update_check error', err));
+    });
+  }
+
+  // Plan 08-06 (D-13/D-14): header update pill — click opens the GitHub
+  // release page (allowlisted host), the × control dismisses it per-version.
+  const updatePillDismiss = document.getElementById('update-pill-dismiss');
+  if (updatePillDismiss) {
+    updatePillDismiss.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const tag = window.pywebview && pywebview.state ? pywebview.state.update_tag : null;
+      if (!tag) return;
+      pywebview.api.dismiss_update(tag)
+        .catch(err => console.error('[app.js] dismiss_update error', err));
+    });
+  }
+  const updatePill = document.getElementById('update-pill');
+  if (updatePill) {
+    updatePill.addEventListener('click', () => {
+      const url = window.pywebview && pywebview.state ? pywebview.state.update_url : null;
+      if (!url) return;
+      pywebview.api.open_external_url(url)
+        .catch(err => console.error('[app.js] open_external_url error', err));
+    });
+  }
+
   // Plan 08-05 (D-15/D-16): language <select> — live re-render on change,
   // no restart. controller.set_language() persists + pushes window.state.language,
   // which render()'s language-change check picks up and applies via applyLanguage().
@@ -1022,6 +1053,29 @@ function renderClientStatus(state) {
 }
 
 /**
+ * Render the header update pill (Plan 08-06, ONBOARD-03, D-13/D-14).
+ *
+ * Mirrors renderClientStatus's shape: driven solely by
+ * state.update_available/state.update_tag/state.update_url (Python->JS via
+ * window.state, same channel). Shown only for a newer, non-dismissed
+ * release (D-13); clicking the body opens the GitHub release page, clicking
+ * the dismiss control (×) hides it until the NEXT version (D-14).
+ *
+ * @param {object} state  Full pywebview.state (AppState serialised by Python).
+ */
+function renderUpdatePill(state) {
+  const el = document.getElementById('update-pill');
+  if (!el) return;
+  if (state.update_available) {
+    el.style.display = 'inline-flex';
+    const label = document.getElementById('update-pill-label');
+    if (label) label.textContent = t('update.available', { tag: state.update_tag });
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+/**
  * Render the subline ("N Accounts · X aktiv").
  *
  * @param {object[]} accounts       Serialised account array.
@@ -1073,6 +1127,7 @@ function render(state) {
   renderAccountList(accounts, activeUsername, status, noApiKey);
   renderStatusBar(state);           // full state machine (D-01..D-04) — Plan 04-04
   renderClientStatus(state);        // header live-status indicator (STATUS-01) — Plan 05-02
+  renderUpdatePill(state);          // header update pill (ONBOARD-03) — Plan 08-06
   renderSubline(accounts, activeUsername);
   renderApiKeyWarningHint(state);   // Plan 08-04 (D-09): persistent 401/403 header hint
   // D-03: lock all switch/CRUD controls while a switch or first-login is in progress

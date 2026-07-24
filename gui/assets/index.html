@@ -153,6 +153,15 @@
   .client-status.neutral .dot{background:var(--text-2)}
   @media (prefers-reduced-motion:reduce){.client-status.live .dot{animation:none}}
 
+  /* ---- Update pill (Plan 08-06, ONBOARD-03, D-13/D-14) ---- */
+  /* Reuses .client-status.running's mint color variant verbatim (no new
+     color token) — the only addition is cursor:pointer, since unlike the
+     status pill this one is clickable. renderUpdatePill() (app.js) toggles
+     display none/inline-flex based on state.update_available. */
+  #update-pill{cursor:pointer}
+  #update-pill-dismiss{margin-left:2px;opacity:.65;font-weight:700}
+  #update-pill-dismiss:hover{opacity:1}
+
   /* ---- Account-Liste ---- */
   .list{display:flex;flex-direction:column;gap:12px;padding:6px 26px 0}
 
@@ -432,6 +441,9 @@
         </div>
         <div class="head-controls">
           <span class="client-status offline" id="client-status"><span class="dot" aria-hidden="true"></span>Offline</span>
+          <span class="client-status running" id="update-pill" style="display:none" aria-label="Update verfügbar">
+            <span class="dot" aria-hidden="true"></span><span id="update-pill-label"></span><span id="update-pill-dismiss" title="Schließen" aria-label="Schließen">&times;</span>
+          </span>
           <button class="icon-btn" id="refreshBtn" title="Aktualisieren" aria-label="Aktualisieren">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
           </button>
