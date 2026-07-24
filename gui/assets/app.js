@@ -17,6 +17,79 @@
  *   stale styling, and on_webview_ready timer start (D-01..D-04, D-16..D-19).
  */
 
+/* ---- i18n (Plan 08-05, ONBOARD-04, D-15/D-16) ---- */
+
+/**
+ * Full DE/EN catalog fetched from the shared gui/assets/i18n/strings.json —
+ * the SAME file gui/i18n.py reads Python-side (RESEARCH.md Pattern 6).
+ * Populated by loadStrings(); stays `{}` on any fetch/parse failure so t()
+ * degrades to raw-key fallback rather than leaving the UI blank (Assumption A1).
+ * @type {Record<string, Record<string, string>>}
+ */
+let I18N = {};
+
+/**
+ * Currently active language ("de"/"en"), kept in sync with window.state.language
+ * by render()'s language-change check below. Defaults to 'en' until the first
+ * state push resolves it.
+ * @type {string}
+ */
+let currentLang = 'en';
+
+/**
+ * Fetch the shared i18n/strings.json catalog (same-origin, served by
+ * pywebview's http_server=True — same mechanism emblems_data.js/fonts already
+ * use via relative URLs). Called once before the first render (gates startup
+ * so status text/data-i18n labels resolve correctly from frame one).
+ * @returns {Promise<void>}
+ */
+async function loadStrings() {
+  try {
+    const resp = await fetch('i18n/strings.json');
+    I18N = await resp.json();
+  } catch (err) {
+    // A1 fallback: degrade to raw-key rendering rather than a blank UI.
+    console.error('[app.js] loadStrings error — degrading to raw-key fallback', err);
+    I18N = {};
+  }
+}
+
+/**
+ * Resolve `key` in the current-language catalog, with {param} interpolation.
+ * Mirrors gui/i18n.py's t() — falls back to the raw key when the catalog or
+ * the specific key is missing/not yet loaded; never throws.
+ * @param {string} key     Dotted catalog key, e.g. "status.done_active".
+ * @param {object} [params] Values substituted into {placeholder}s.
+ * @returns {string}
+ */
+function t(key, params) {
+  if (!key) return '';
+  const template = (I18N[currentLang] && I18N[currentLang][key]) || key;
+  if (!params) return template;
+  return template.replace(/\{(\w+)\}/g, (match, name) =>
+    Object.prototype.hasOwnProperty.call(params, name) ? params[name] : match);
+}
+
+/**
+ * Switch the active UI language live (D-16 — no restart): translates every
+ * static `[data-i18n]` label, then re-renders all dynamic content (status
+ * bar, account list, etc.) so the WHOLE UI reflects the new language.
+ * @param {string} lang  "de" or "en".
+ */
+function applyLanguage(lang) {
+  currentLang = lang || 'en';
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  // Re-render dynamic content (status bar text, rank-tile "Kein API-Key"
+  // hint, etc.) now that currentLang has changed. render()'s own
+  // language-change check below will see state.language === currentLang
+  // on this call and proceed straight to the normal render path (no loop).
+  if (window.pywebview && pywebview.state) {
+    render(pywebview.state);
+  }
+}
+
 /* ---- Design helpers (ported 1:1 from lol-switcher-mobalytics.html) ---- */
 
 /**
@@ -160,7 +233,14 @@ function renderStatusBar(state) {
   if (!bar) return;
 
   const status = state.status || 'idle';
-  const statusMessage = state.status_message || null;
+  // Plan 08-05 (ONBOARD-04): resolve status text via the key+params contract
+  // so it re-translates live on a language switch (D-16). Falls back to the
+  // raw state.status_message only when status_key is entirely absent (safety
+  // net for any state pushed before Plan 08-05 wiring — never expected once
+  // both sides are on this contract).
+  const statusMessage = state.status_key
+    ? (t(state.status_key, state.status_params) || null)
+    : (state.status_message || null);
   const pendingUser = state.pending_first_login || null;
   const activeUsername = state.active_username || null;
 
@@ -310,7 +390,7 @@ function rankRow(rankData, queueLabel, stale, noApiKey) {
     return `<div class="rank no-api-key" data-open-settings="1" title="API-Key in den Einstellungen hinterlegen">
       <div class="info">
         <div class="queue">${esc(queueLabel)}</div>
-        <div class="tier">Kein API-Key</div>
+        <div class="tier">${esc(t('card.no_api_key'))}</div>
       </div>
     </div>`;
   }
@@ -755,6 +835,17 @@ document.addEventListener('keydown', function (e) {
     });
   }
 
+  // Plan 08-05 (D-15/D-16): language <select> — live re-render on change,
+  // no restart. controller.set_language() persists + pushes window.state.language,
+  // which render()'s language-change check picks up and applies via applyLanguage().
+  const settingsLanguage = document.getElementById('settings-language');
+  if (settingsLanguage) {
+    settingsLanguage.addEventListener('change', () => {
+      pywebview.api.set_language(settingsLanguage.value)
+        .catch(err => console.error('[app.js] set_language error', err));
+    });
+  }
+
   // Plan 08-04: Welcome dialog (Speichern / Später / dev-portal link)
   const welcomeSubmit = document.getElementById('welcome-submit');
   if (welcomeSubmit) welcomeSubmit.addEventListener('click', () => submitSaveApiKey('welcome-modal'));
@@ -964,6 +1055,15 @@ function renderSubline(accounts, activeUsername) {
  * @param {object} state  The pywebview.state object (AppState serialised by Python).
  */
 function render(state) {
+  // Plan 08-05 (D-16): if the language changed, translate the static
+  // [data-i18n] labels first, then let applyLanguage() re-invoke render()
+  // with currentLang already caught up — avoids rendering once with the
+  // stale language and again with the new one.
+  if (state.language && state.language !== currentLang) {
+    applyLanguage(state.language);
+    return;
+  }
+
   const accounts = state.accounts || [];
   const activeUsername = state.active_username || null;
   const status = state.status || 'idle';
@@ -1205,10 +1305,16 @@ window.addEventListener('pywebviewready', function () {
     render(pywebview.state);
   });
 
-  // Initial render from the state that on_webview_ready() just pushed
-  render(pywebview.state);
+  // Plan 08-05 (ONBOARD-04): fetch the shared i18n catalog BEFORE the first
+  // render so status text / data-i18n labels resolve correctly from frame
+  // one. A fetch failure degrades to raw-key fallback (A1) rather than
+  // blocking startup — loadStrings() never rejects.
+  loadStrings().then(function () {
+    // Initial render from the state that on_webview_ready() just pushed
+    render(pywebview.state);
 
-  // Plan 08-04 (D-01/D-02): first-run welcome dialog — shown only when no
-  // key is found anywhere (WCM nor DPAPI file). Checked once at startup.
-  maybeShowWelcome();
+    // Plan 08-04 (D-01/D-02): first-run welcome dialog — shown only when no
+    // key is found anywhere (WCM nor DPAPI file). Checked once at startup.
+    maybeShowWelcome();
+  });
 });

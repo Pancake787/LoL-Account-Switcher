@@ -337,5 +337,67 @@ class TestControllerI18nBridgeContract(unittest.TestCase):
             self.assertEqual(i18n.get_language(), "de")
 
 
+class TestJsWiringContentGates(unittest.TestCase):
+    """Plan 08-05 Task 2 — content-grep gates for the app.js/index.html wiring.
+
+    Regression guard: catches an accidental removal of the JS i18n plumbing
+    (the fetch/resolver/live-re-render/select wiring) that unit tests alone
+    (no real browser/webview in this suite) cannot otherwise exercise.
+    """
+
+    _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+    def _app_js_text(self) -> str:
+        return (self._REPO_ROOT / "gui" / "assets" / "app.js").read_text(encoding="utf-8")
+
+    def _index_html_text(self) -> str:
+        return (self._REPO_ROOT / "gui" / "assets" / "index.html").read_text(encoding="utf-8")
+
+    def test_app_js_fetches_strings_json(self) -> None:
+        self.assertIn("i18n/strings.json", self._app_js_text())
+
+    def test_app_js_has_apply_language(self) -> None:
+        self.assertIn("applyLanguage", self._app_js_text())
+
+    def test_app_js_resolves_status_key(self) -> None:
+        self.assertIn("status_key", self._app_js_text())
+
+    def test_app_js_wires_set_language(self) -> None:
+        self.assertIn("set_language", self._app_js_text())
+
+    def test_index_html_has_at_least_8_data_i18n_labels(self) -> None:
+        self.assertGreaterEqual(self._index_html_text().count("data-i18n"), 8)
+
+
+class TestControllerEmittedKeyParity(unittest.TestCase):
+    """Key-drift parity (Plan 08-05 Task 2): every status.*/error.*/riotapi.*
+    key the controller can emit must exist in BOTH `de` and `en` catalogs —
+    guards against toggling to English still showing German leftovers
+    (RESEARCH.md Pitfall 3 warning sign)."""
+
+    #: Enumerated from every _set_status/_post_status/_post_error/i18n.t()/
+    #: _translate_riot_error() call site wired in controller.py by this plan.
+    _EMITTED_KEYS = [
+        "status.blocked_match", "status.killing_client", "status.kill_failed",
+        "status.no_snapshot", "status.riot_not_found_switched", "status.unknown_error",
+        "status.switching_session", "status.riot_not_found_manual", "status.unknown_error_exc",
+        "status.pending_login", "status.snapshot_saved", "status.no_login_yet",
+        "status.recapture_blocked", "status.recapture_resetting", "status.recapture_not_found",
+        "status.done_active", "status.api_key_saved", "status.api_key_invalid",
+        "error.name_empty", "error.username_empty", "error.password_empty",
+        "error.account_exists", "error.riot_id_slash", "error.region_invalid",
+        "error.riot_id_format", "error.riot_id_not_found", "error.riot_id_network",
+        "error.api_key_network", "error.api_key_invalid",
+        "riotapi.key_unauthorized", "riotapi.player_not_found",
+        "riotapi.rate_limit", "riotapi.api_error",
+    ]
+
+    def test_every_emitted_key_present_in_both_languages(self) -> None:
+        i18n.reload()
+        for key in self._EMITTED_KEYS:
+            self.assertIn(key, i18n._STRINGS.get("de", {}), f"{key} missing from de catalog")
+            self.assertIn(key, i18n._STRINGS.get("en", {}), f"{key} missing from en catalog")
+
+
 if __name__ == "__main__":
     unittest.main()

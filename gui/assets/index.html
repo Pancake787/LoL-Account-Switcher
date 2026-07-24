@@ -426,7 +426,7 @@
     <div class="content-inner">
       <div class="head">
         <div>
-          <h1>Accounts</h1>
+          <h1 data-i18n="ui.app_title">Accounts</h1>
           <div class="sub" id="subline">Lade&hellip;</div>
           <span class="api-key-warning-hint" id="api-key-warning-hint">API-Key abgelaufen &mdash; Settings</span>
         </div>
@@ -445,7 +445,7 @@
 
       <button class="add" id="addBtn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-        Account hinzuf&uuml;gen
+        <span data-i18n="ui.add_account_title">Account hinzuf&uuml;gen</span>
       </button>
     </div>
   </div>
@@ -473,25 +473,25 @@
 <!-- Account hinzufügen -->
 <div class="modal-overlay" id="add-account-modal" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
   <div class="modal">
-    <h2 id="add-modal-title">Account hinzuf&uuml;gen</h2>
+    <h2 id="add-modal-title" data-i18n="ui.add_account_title">Account hinzuf&uuml;gen</h2>
     <div class="modal-field">
-      <label for="add-display-name">Anzeigename</label>
+      <label for="add-display-name" data-i18n="ui.display_name_label">Anzeigename</label>
       <input type="text" id="add-display-name" placeholder="z.B. Main" autocomplete="off">
     </div>
     <div class="modal-field">
-      <label for="add-username">Riot-Benutzername</label>
+      <label for="add-username" data-i18n="ui.username_label">Riot-Benutzername</label>
       <input type="text" id="add-username" placeholder="Riot-Benutzername" autocomplete="username">
     </div>
     <div class="modal-field">
-      <label for="add-password">Passwort</label>
+      <label for="add-password" data-i18n="ui.password_label">Passwort</label>
       <input type="password" id="add-password" placeholder="Passwort" autocomplete="current-password">
     </div>
     <div class="modal-field">
-      <label for="add-riot-id">Riot-ID <span style="color:var(--text-3);font-weight:400">(optional)</span></label>
+      <label for="add-riot-id"><span data-i18n="ui.riot_id_label">Riot-ID</span> <span style="color:var(--text-3);font-weight:400" data-i18n="ui.riot_id_optional">(optional)</span></label>
       <input type="text" id="add-riot-id" placeholder="z.B. Main#EUW" autocomplete="off">
     </div>
     <div class="modal-field">
-      <label for="add-region">Region</label>
+      <label for="add-region" data-i18n="ui.region_label">Region</label>
       <select id="add-region">
         <option value="EUW1">EUW — EU West</option>
         <option value="EUN1">EUNE — EU Nordost</option>
@@ -512,8 +512,8 @@
     </div>
     <div class="modal-error" id="add-account-error"></div>
     <div class="modal-actions">
-      <button class="btn-primary" id="add-account-submit">Speichern</button>
-      <button class="btn-secondary" onclick="closeModal('add-account-modal')">Abbrechen</button>
+      <button class="btn-primary" id="add-account-submit" data-i18n="ui.save">Speichern</button>
+      <button class="btn-secondary" data-i18n="ui.cancel" onclick="closeModal('add-account-modal')">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -521,16 +521,16 @@
 <!-- Umbenennen -->
 <div class="modal-overlay" id="rename-modal" role="dialog" aria-modal="true" aria-labelledby="rename-modal-title">
   <div class="modal">
-    <h2 id="rename-modal-title">Account umbenennen</h2>
+    <h2 id="rename-modal-title" data-i18n="ui.rename_title">Account umbenennen</h2>
     <div class="modal-field">
-      <label for="rename-display-name">Neuer Anzeigename</label>
+      <label for="rename-display-name" data-i18n="ui.new_display_name_label">Neuer Anzeigename</label>
       <input type="text" id="rename-display-name" placeholder="Anzeigename" autocomplete="off">
     </div>
     <input type="hidden" id="rename-username">
     <div class="modal-error" id="rename-error"></div>
     <div class="modal-actions">
-      <button class="btn-primary" id="rename-submit">Speichern</button>
-      <button class="btn-secondary" onclick="closeModal('rename-modal')">Abbrechen</button>
+      <button class="btn-primary" id="rename-submit" data-i18n="ui.save">Speichern</button>
+      <button class="btn-secondary" data-i18n="ui.cancel" onclick="closeModal('rename-modal')">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -538,13 +538,13 @@
 <!-- Riot-ID bearbeiten -->
 <div class="modal-overlay" id="edit-riot-id-modal" role="dialog" aria-modal="true" aria-labelledby="edit-riot-id-title">
   <div class="modal">
-    <h2 id="edit-riot-id-title">Riot-ID bearbeiten</h2>
+    <h2 id="edit-riot-id-title" data-i18n="ui.edit_riot_id_title">Riot-ID bearbeiten</h2>
     <div class="modal-field">
-      <label for="edit-riot-id">Riot-ID <span style="color:var(--text-3);font-weight:400">(optional)</span></label>
+      <label for="edit-riot-id"><span data-i18n="ui.riot_id_label">Riot-ID</span> <span style="color:var(--text-3);font-weight:400" data-i18n="ui.riot_id_optional">(optional)</span></label>
       <input type="text" id="edit-riot-id" placeholder="z.B. Main#EUW" autocomplete="off">
     </div>
     <div class="modal-field">
-      <label for="edit-region">Region</label>
+      <label for="edit-region" data-i18n="ui.region_label">Region</label>
       <select id="edit-region">
         <option value="EUW1">EUW — EU West</option>
         <option value="EUN1">EUNE — EU Nordost</option>
@@ -566,8 +566,8 @@
     <input type="hidden" id="edit-riot-id-username">
     <div class="modal-error" id="edit-riot-id-error"></div>
     <div class="modal-actions">
-      <button class="btn-primary" id="edit-riot-id-submit">Speichern</button>
-      <button class="btn-secondary" onclick="closeModal('edit-riot-id-modal')">Abbrechen</button>
+      <button class="btn-primary" id="edit-riot-id-submit" data-i18n="ui.save">Speichern</button>
+      <button class="btn-secondary" data-i18n="ui.cancel" onclick="closeModal('edit-riot-id-modal')">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -575,15 +575,15 @@
 <!-- Account l&ouml;schen (best&auml;tigen) -->
 <div class="modal-overlay" id="confirm-delete-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-delete-title">
   <div class="modal">
-    <h2 id="confirm-delete-title">Account wirklich l&ouml;schen?</h2>
+    <h2 id="confirm-delete-title" data-i18n="ui.confirm_delete_title">Account wirklich l&ouml;schen?</h2>
     <div class="modal-confirm-body" id="confirm-delete-body">
       <strong id="confirm-delete-name"></strong> und alle gespeicherten Daten werden dauerhaft gel&ouml;scht.
       Dies kann nicht r&uuml;ckg&auml;ngig gemacht werden.
     </div>
     <input type="hidden" id="confirm-delete-username">
     <div class="modal-actions">
-      <button class="btn-danger" id="confirm-delete-submit">Endg&uuml;ltig l&ouml;schen</button>
-      <button class="btn-secondary" onclick="closeModal('confirm-delete-modal')">Abbrechen</button>
+      <button class="btn-danger" id="confirm-delete-submit" data-i18n="ui.delete_permanently">Endg&uuml;ltig l&ouml;schen</button>
+      <button class="btn-secondary" data-i18n="ui.cancel" onclick="closeModal('confirm-delete-modal')">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -591,24 +591,24 @@
 <!-- Einstellungen (D-05/D-06/D-07) -->
 <div class="modal-overlay" id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
   <div class="modal">
-    <h2 id="settings-modal-title">Einstellungen</h2>
+    <h2 id="settings-modal-title" data-i18n="settings.title">Einstellungen</h2>
 
     <!-- (1) API-Key: maskierte Anzeige, &auml;ndern/l&ouml;schen, Live-Validierung -->
     <div class="modal-field">
-      <label for="settings-api-key">Riot API-Key</label>
+      <label for="settings-api-key" data-i18n="settings.api_key_label">Riot API-Key</label>
       <input type="text" id="settings-api-key" placeholder="Kein Key hinterlegt" readonly autocomplete="off">
       <input type="password" id="settings-api-key-input" placeholder="Neuen Key eingeben" autocomplete="off" style="margin-top:8px">
     </div>
     <div class="modal-success" id="settings-key-feedback-success"></div>
     <div class="modal-error" id="settings-key-feedback"></div>
     <div class="modal-actions">
-      <button class="btn-primary" id="settings-key-save">&Auml;ndern</button>
-      <button class="btn-secondary" id="settings-key-delete">L&ouml;schen</button>
+      <button class="btn-primary" id="settings-key-save" data-i18n="settings.change">&Auml;ndern</button>
+      <button class="btn-secondary" id="settings-key-delete" data-i18n="settings.delete">L&ouml;schen</button>
     </div>
 
     <!-- (2) Sprache DE/EN -->
     <div class="modal-field" style="margin-top:18px">
-      <label for="settings-language">Sprache</label>
+      <label for="settings-language" data-i18n="settings.language_label">Sprache</label>
       <select id="settings-language">
         <option value="de">Deutsch</option>
         <option value="en">English</option>
@@ -617,18 +617,18 @@
 
     <!-- (3) Update-Check an/aus -->
     <div class="modal-field modal-toggle-row">
-      <span class="modal-toggle-label">Auf Updates pr&uuml;fen</span>
+      <span class="modal-toggle-label" data-i18n="settings.update_check_label">Auf Updates pr&uuml;fen</span>
       <input type="checkbox" id="settings-update-check">
     </div>
 
     <!-- (4) GPU-Beschleunigung -->
     <div class="modal-field modal-toggle-row">
-      <span class="modal-toggle-label">GPU-Beschleunigung <span style="color:var(--text-3);font-weight:400">(kann HDR-Dark-Screen verursachen &mdash; wirksam nach Neustart)</span></span>
+      <span class="modal-toggle-label"><span data-i18n="settings.gpu_label">GPU-Beschleunigung</span> <span style="color:var(--text-3);font-weight:400" data-i18n="settings.gpu_warning">(kann HDR-Dark-Screen verursachen &mdash; wirksam nach Neustart)</span></span>
       <input type="checkbox" id="settings-gpu">
     </div>
 
     <div class="modal-actions" style="margin-top:6px">
-      <button class="btn-secondary" onclick="closeModal('settings-modal')">Schlie&szlig;en</button>
+      <button class="btn-secondary" data-i18n="settings.close" onclick="closeModal('settings-modal')">Schlie&szlig;en</button>
     </div>
   </div>
 </div>
@@ -636,24 +636,24 @@
 <!-- Willkommen — Erststart-Onboarding (D-01..D-04) -->
 <div class="modal-overlay" id="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-modal-title">
   <div class="modal">
-    <h2 id="welcome-modal-title">Willkommen!</h2>
+    <h2 id="welcome-modal-title" data-i18n="onboard.title">Willkommen!</h2>
     <div class="modal-confirm-body">
       Hinterlege deinen pers&ouml;nlichen Riot API-Key, damit Rang-Daten angezeigt werden k&ouml;nnen.
       Das Wechseln zwischen Accounts funktioniert auch ohne Key.
     </div>
     <ol class="welcome-steps">
-      <li><a id="welcome-dev-link">developer.riotgames.com</a> &ouml;ffnen</li>
+      <li><a id="welcome-dev-link" data-i18n="onboard.link_label">developer.riotgames.com &ouml;ffnen</a></li>
       <li>Mit deinem Riot-Account einloggen</li>
       <li>Den &bdquo;Personal API Key&ldquo; kopieren</li>
     </ol>
     <div class="modal-field">
-      <label for="welcome-api-key">Riot API-Key</label>
+      <label for="welcome-api-key" data-i18n="settings.api_key_label">Riot API-Key</label>
       <input type="password" id="welcome-api-key" placeholder="RGAPI-..." autocomplete="off">
     </div>
     <div class="modal-error" id="welcome-error"></div>
     <div class="modal-actions">
-      <button class="btn-primary" id="welcome-submit">Speichern</button>
-      <button class="btn-secondary" id="welcome-skip">Sp&auml;ter</button>
+      <button class="btn-primary" id="welcome-submit" data-i18n="onboard.save">Speichern</button>
+      <button class="btn-secondary" id="welcome-skip" data-i18n="onboard.later">Sp&auml;ter</button>
     </div>
   </div>
 </div>
