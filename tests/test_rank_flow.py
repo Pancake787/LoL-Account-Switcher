@@ -832,9 +832,12 @@ class TestSaveApiKeyTriggerRefresh(unittest.TestCase):
         from controller import Controller
 
         ctrl = Controller(_FakeRoot())
-        with patch.object(ctrl, "_trigger_rank_refresh") as mock_refresh:
-            ctrl.save_api_key("my-api-key-abc")
-            mock_refresh.assert_called_once()
+        # Plan 08-04 (D-03): save_api_key now live-validates before storing —
+        # mock the network call so this test stays hermetic.
+        with patch("rank_service.validate_api_key", return_value=True):
+            with patch.object(ctrl, "_trigger_rank_refresh") as mock_refresh:
+                ctrl.save_api_key("my-api-key-abc")
+                mock_refresh.assert_called_once()
 
 
 class TestRefreshRanksManual(unittest.TestCase):

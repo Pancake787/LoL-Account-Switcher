@@ -57,6 +57,10 @@ class Controller:
         #: StatusPoller.on_change (daemon thread, wired in gui/webview_window.py).
         self._client_running: bool = False
         self._game_live: bool = False
+        #: Plan 08-04 (D-09): persistent header hint set on a 401/403 rank-fetch
+        #: error, cleared on the next successful rank fetch. Ephemeral, like
+        #: _client_running/_game_live — never persisted to accounts.json.
+        self._api_key_warning: bool = False
         #: Set by webview_window.start() after construction; stopped centrally
         #: in shutdown() (WR-03). None when no poller was wired (e.g. headless/tests).
         self._status_poller = None
@@ -182,6 +186,11 @@ class Controller:
         # STATUS-01 (D-17): live client/game status — top-level writes only.
         window.state.client_running = self._client_running
         window.state.game_live = self._game_live
+        # Plan 08-04 (ONBOARD-01/02): API-key presence + persistent expiry hint.
+        # has_api_key drives the "Kein API-Key" rank-tile hint (D-01);
+        # api_key_warning drives the persistent header hint on 401/403 (D-09).
+        window.state.has_api_key = self.has_api_key()
+        window.state.api_key_warning = self._api_key_warning
 
     def update_client_status(self, client_running: bool, game_live: bool) -> None:
         """Handle a status transition from StatusPoller.on_change (STATUS-01/D-17).
@@ -1100,24 +1109,49 @@ class Controller:
     # ------------------------------------------------------------------
 
     def save_api_key(self, key: str) -> None:
-        """Store the Riot API key in Windows Credential Manager and notify the UI.
+        """Validate the candidate key live, then store it and refresh ranks.
 
-        Delegates to credential_store.save_api_key (DPAPI/WCM).  The key
-        value is never written to accounts.json or any log (T-02-01).
-
-        After saving, triggers an immediate rank refresh for all accounts that
-        have a PUUID set (UI-SPEC Settings Interaction step 6, D-23 Trigger 1).
+        Plan 08-04 (D-03/D-08, ONBOARD-01/02): BEFORE storing, calls
+        ``rank_service.validate_api_key`` (a cheap status-v4 call requiring no
+        Riot ID/PUUID). An invalid/expired key (401/403 -> False) or a network
+        failure raises ``ValueError`` and the key is NEVER stored or logged
+        (T-08-11/T-02-05) — this is the same "validate BEFORE persist" shape
+        used by ``add_account``'s riot_id/PUUID resolution. Only on success:
+        delegates to credential_store.save_api_key (DPAPI/WCM), clears the
+        persistent expiry hint, and triggers an immediate rank refresh (D-08 —
+        same trigger logic as after a Riot-ID edit).
 
         Args:
             key: The personal Riot API key entered by the user.
+
+        Raises:
+            ValueError: If the key is invalid/expired, a network error occurs,
+                or the Riot API returns a transient error (429/5xx).
         """
+        try:
+            valid = rank_service.validate_api_key(key)
+        except rank_service.RiotAPIError as exc:
+            # 429/5xx — transient Riot-side error, not a verdict on the key itself.
+            raise ValueError(
+                f"API-Fehler beim Prüfen des Keys ({exc.status_code}). "
+                "Bitte später erneut versuchen."
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            raise ValueError(
+                "Netzwerkfehler beim Prüfen des API-Keys. Bitte erneut versuchen."
+            ) from exc
+
+        if not valid:
+            raise ValueError("API-Key ungültig oder abgelaufen.")
+
         credential_store.save_api_key(key)
+        self._api_key_warning = False  # D-09: a freshly validated key clears the hint
         self._set_status(SwitchStatus.IDLE, "API-Key gespeichert.")
-        # Trigger immediate rank refresh now that a key is available (D-23 Trigger 1)
+        # Trigger immediate rank refresh now that a key is available (D-08 / D-23 Trigger 1)
         self._trigger_rank_refresh()
 
     def has_api_key(self) -> bool:
-        """Return True if a Riot API key is currently stored in WCM.
+        """Return True if a Riot API key is currently stored (WCM or DPAPI file).
 
         Returns:
             bool: True if a non-empty key is stored; False otherwise.
@@ -1133,6 +1167,46 @@ class Controller:
             str: '••••••••' if a key is stored, '' otherwise.
         """
         return "••••••••" if self.has_api_key() else ""
+
+    def delete_api_key(self) -> None:
+        """Delete the stored Riot API key (both WCM entry and DPAPI file).
+
+        Plan 08-04 (ONBOARD-02): clears the persistent expiry hint (D-09) and
+        pushes state so the Settings modal + rank tiles immediately reflect
+        the "no key" state. The key value is never logged (T-08-11).
+        """
+        credential_store.delete_api_key()
+        credential_store.delete_api_key_file()
+        self._api_key_warning = False
+        self._push_state()
+
+    def get_settings(self) -> dict:
+        """Return the current app-wide settings for the Settings modal (ONBOARD-02).
+
+        Never includes the raw API key — only the fixed 8-bullet mask
+        (T-08-11 / get_api_key_masked's own no-length-leak guarantee).
+
+        Returns:
+            dict: ``{"has_api_key": bool, "api_key_masked": str,
+            "language": str|None, "update_check_enabled": bool,
+            "disable_gpu": bool}``.
+        """
+        return {
+            "has_api_key": self.has_api_key(),
+            "api_key_masked": self.get_api_key_masked(),
+            "language": self.state.language,
+            "update_check_enabled": self.state.update_check_enabled,
+            "disable_gpu": self.state.disable_gpu,
+        }
+
+    def set_gpu(self, enabled: bool) -> None:
+        """Persist the GPU-acceleration toggle (D-07 — effective after restart).
+
+        Args:
+            enabled: True to enable GPU acceleration (disable_gpu=False).
+        """
+        self.state.disable_gpu = not enabled
+        config.save_state(self.state)
 
     # ------------------------------------------------------------------
     # Phase 2 — Rank fetch orchestration (D-23/D-24/D-27/D-28)
@@ -1258,6 +1332,9 @@ class Controller:
                 acc.rank_cache_ts = rank_info.fetched_at
                 break
         config.save_state(self.state)
+        # Plan 08-04 (D-09): a successful fetch proves the key is valid again —
+        # clear the persistent header hint set by a prior 401/403.
+        self._api_key_warning = False
         self._push_state()
 
     def _on_rank_error(self, username: str, exc: Exception) -> None:
@@ -1294,6 +1371,10 @@ class Controller:
                 "API-Key ungültig oder abgelaufen. Bitte in den Einstellungen prüfen."
             )
             # Note: we do NOT change SwitchStatus here (rank errors are silent per UI-SPEC)
+            # Plan 08-04 (D-09): also set the PERSISTENT header hint (unlike
+            # status_message, which is transient and gets overwritten by other
+            # status updates) — cleared on the next successful _on_rank_ready.
+            self._api_key_warning = True
 
         self._push_state()
 

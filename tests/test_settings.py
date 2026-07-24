@@ -11,6 +11,7 @@ import pathlib
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,8 @@ sys.modules["keyring.errors"] = _keyring_errors_mod
 
 import credential_store  # noqa: E402  (must come after fake inject)
 import config  # noqa: E402
+import rank_service  # noqa: E402
+import controller as controller_module  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +204,259 @@ class TestApiKeyFile(unittest.TestCase):
 
     def test_delete_file_when_absent_does_not_raise(self) -> None:
         credential_store.delete_api_key_file()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Fake pywebview window — minimal .state stub (mirrors test_account_mgmt.py's
+# _FakeTkRoot/_FakeWindowState, trimmed to what Controller._push_state needs).
+# ---------------------------------------------------------------------------
+
+class _FakeWindowState:
+    """Attribute sink for window.state.* writes — accepts any attribute."""
+
+
+class _FakeWindow:
+    def __init__(self) -> None:
+        self.state = _FakeWindowState()
+
+
+# ---------------------------------------------------------------------------
+# Plan 08-04 Task 1 — Controller: live key validation on save (D-03),
+# immediate refresh (D-08), 401/403 header hint (D-09), get_settings/
+# delete_api_key/set_gpu.
+# ---------------------------------------------------------------------------
+
+class TestControllerApiKeySettings(unittest.TestCase):
+    """Unit tests for controller.py's Phase-8 Settings/onboarding surface."""
+
+    def _make_controller_ctx(self, tmp_path: pathlib.Path):
+        fake_window = _FakeWindow()
+        patcher_app = patch.object(config, "APP_DIR", tmp_path)
+        patcher_json = patch.object(config, "ACCOUNTS_JSON", tmp_path / "accounts.json")
+        patcher_sessions = patch.object(config, "SESSIONS_DIR", tmp_path / "sessions")
+        patcher_app.start()
+        patcher_json.start()
+        patcher_sessions.start()
+        config.ensure_dirs()
+        # Cross-file test-isolation guard (same pattern documented in
+        # 08-03-SUMMARY.md): credential_store's module-level `keyring` binding
+        # can be rebound by a sibling test file's importlib.reload() at
+        # collection/run time, so `_fake_keyring.reset()` in setUp() (which
+        # only clears THIS file's own fake-keyring instance) is not sufficient
+        # to guarantee a clean slate. Clear via the real credential_store API
+        # (writes through to whichever backend is currently bound) instead.
+        credential_store.delete_api_key()
+        credential_store.delete_api_key_file()
+        ctrl = controller_module.Controller(fake_window)
+        ctrl._fake_window = fake_window
+        self._ctrls.append(ctrl)
+        return ctrl, [patcher_app, patcher_json, patcher_sessions]
+
+    def setUp(self) -> None:
+        _fake_keyring.reset()
+        self._ctrls = []
+
+    def tearDown(self) -> None:
+        for ctrl in self._ctrls:
+            ctrl.shutdown()
+
+    def test_save_api_key_invalid_does_not_store_or_refresh(self) -> None:
+        """A key that fails live validation raises ValueError, is never stored,
+        and never triggers a rank refresh (D-03)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                with patch("rank_service.validate_api_key", return_value=False):
+                    with patch.object(ctrl, "_trigger_rank_refresh") as mock_refresh:
+                        with self.assertRaises(ValueError):
+                            ctrl.save_api_key("RGAPI-bad-key")
+                        mock_refresh.assert_not_called()
+                self.assertFalse(ctrl.has_api_key())
+                self.assertEqual(credential_store.get_api_key(), "")
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_save_api_key_valid_stores_then_refreshes_in_order(self) -> None:
+        """A key that passes live validation is stored via credential_store,
+        THEN triggers an immediate rank refresh (D-03/D-08, order asserted)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                call_order = []
+                orig_save = credential_store.save_api_key
+
+                def _spy_save(key: str) -> None:
+                    call_order.append("save")
+                    orig_save(key)
+
+                def _spy_refresh() -> None:
+                    call_order.append("refresh")
+
+                with patch("rank_service.validate_api_key", return_value=True):
+                    with patch.object(credential_store, "save_api_key", side_effect=_spy_save):
+                        with patch.object(ctrl, "_trigger_rank_refresh", side_effect=_spy_refresh):
+                            ctrl.save_api_key("RGAPI-good-key")
+
+                self.assertEqual(call_order, ["save", "refresh"])
+                self.assertEqual(credential_store.get_api_key(), "RGAPI-good-key")
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_save_api_key_never_leaks_key_value(self) -> None:
+        """Neither the invalid-key ValueError message nor the status message
+        after a successful save ever contains the raw key string (T-02-05)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                secret = "RGAPI-super-secret-value-12345"
+                with patch("rank_service.validate_api_key", return_value=False):
+                    try:
+                        ctrl.save_api_key(secret)
+                    except ValueError as exc:
+                        self.assertNotIn(secret, str(exc))
+                    else:
+                        self.fail("expected ValueError")
+
+                with patch("rank_service.validate_api_key", return_value=True):
+                    with patch.object(ctrl, "_trigger_rank_refresh"):
+                        ctrl.save_api_key(secret)
+                self.assertNotIn(secret, ctrl.state.status_message)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_save_api_key_network_error_raises_value_error(self) -> None:
+        """A RequestException during validation surfaces as a ValueError, not
+        an unhandled exception, and does not store the key."""
+        import tempfile
+        import requests.exceptions
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                with patch(
+                    "rank_service.validate_api_key",
+                    side_effect=requests.exceptions.ConnectionError("boom"),
+                ):
+                    with self.assertRaises(ValueError):
+                        ctrl.save_api_key("RGAPI-key")
+                self.assertFalse(ctrl.has_api_key())
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_save_api_key_5xx_raises_value_error(self) -> None:
+        """A RiotAPIError (e.g. 500/429) during validation surfaces as a
+        ValueError rather than propagating the raw RiotAPIError."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                with patch(
+                    "rank_service.validate_api_key",
+                    side_effect=rank_service.RiotAPIError(500, "API-Fehler 500"),
+                ):
+                    with self.assertRaises(ValueError):
+                        ctrl.save_api_key("RGAPI-key")
+                self.assertFalse(ctrl.has_api_key())
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_rank_error_401_sets_warning_then_ready_clears_it(self) -> None:
+        """A 401 RiotAPIError during a rank fetch sets api_key_warning=True
+        (pushed to window.state); a subsequent successful fetch resets it (D-09)."""
+        import tempfile
+        from models import RankInfo
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                ctrl._on_rank_error(
+                    "someuser", rank_service.RiotAPIError(401, "unauthorized")
+                )
+                self.assertTrue(ctrl._api_key_warning)
+                self.assertTrue(ctrl._fake_window.state.api_key_warning)
+
+                ctrl._on_rank_ready(
+                    "someuser",
+                    RankInfo(solo=None, flex=None, fetched_at=0.0, stale=False),
+                )
+                self.assertFalse(ctrl._api_key_warning)
+                self.assertFalse(ctrl._fake_window.state.api_key_warning)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_get_settings_shape_never_includes_raw_key(self) -> None:
+        """get_settings() returns the documented keys; api_key_masked is the
+        fixed 8-bullet mask (or '') and never the raw key value."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                settings = ctrl.get_settings()
+                self.assertEqual(
+                    set(settings.keys()),
+                    {
+                        "has_api_key",
+                        "api_key_masked",
+                        "language",
+                        "update_check_enabled",
+                        "disable_gpu",
+                    },
+                )
+                self.assertFalse(settings["has_api_key"])
+                self.assertEqual(settings["api_key_masked"], "")
+
+                credential_store.save_api_key("RGAPI-some-key")
+                settings2 = ctrl.get_settings()
+                self.assertTrue(settings2["has_api_key"])
+                self.assertEqual(settings2["api_key_masked"], "••••••••")
+                self.assertNotIn("RGAPI-some-key", str(settings2))
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_set_gpu_persists_disable_gpu_inverted(self) -> None:
+        """set_gpu(True) -> disable_gpu=False; set_gpu(False) -> disable_gpu=True
+        (round-tripped via config.save_state/load_state)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                ctrl.set_gpu(True)
+                self.assertFalse(ctrl.state.disable_gpu)
+                reloaded = config.load_state()
+                self.assertFalse(reloaded.disable_gpu)
+
+                ctrl.set_gpu(False)
+                self.assertTrue(ctrl.state.disable_gpu)
+                reloaded2 = config.load_state()
+                self.assertTrue(reloaded2.disable_gpu)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_delete_api_key_removes_key_and_clears_warning(self) -> None:
+        """delete_api_key() removes both WCM + DPAPI-file entries and clears
+        the persistent expiry hint."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctrl, patchers = self._make_controller_ctx(pathlib.Path(tmp))
+            try:
+                credential_store.save_api_key("RGAPI-to-delete")
+                ctrl._api_key_warning = True
+                ctrl.delete_api_key()
+                self.assertFalse(ctrl.has_api_key())
+                self.assertFalse(ctrl._api_key_warning)
+                self.assertFalse(ctrl._fake_window.state.api_key_warning)
+            finally:
+                for p in patchers:
+                    p.stop()
 
 
 if __name__ == "__main__":
