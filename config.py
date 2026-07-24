@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
+import tempfile
 
 from models import Account, AppState
 
@@ -36,56 +38,103 @@ def ensure_dirs() -> None:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_state() -> AppState:
-    """Load AppState from accounts.json.
+def _backup_path() -> pathlib.Path:
+    """Rolling backup of the last known-good accounts.json (derived at call time
+    so tests that override ACCOUNTS_JSON get the matching backup path)."""
+    return ACCOUNTS_JSON.with_name(ACCOUNTS_JSON.name + ".bak")
 
-    Returns an empty AppState when the file is missing (first run) or
-    malformed/partial.  Never raises — the caller can always rely on a valid
-    AppState being returned.
 
-    Security: The JSON file must NEVER contain a "password" key.  This
-    function ignores any such key even if it were somehow present.
+def _corrupt_path() -> pathlib.Path:
+    """Where a corrupt accounts.json is quarantined for forensics/manual recovery."""
+    return ACCOUNTS_JSON.with_name(ACCOUNTS_JSON.name + ".corrupt")
+
+
+def _state_from_json(raw: str) -> AppState:
+    """Parse accounts.json content into an AppState. Raises on malformed JSON.
+
+    Security: The JSON file must NEVER contain a "password" key.  This function
+    ignores any such key even if it were somehow present.
     """
-    if not ACCOUNTS_JSON.exists():
-        return AppState()
+    data = json.loads(raw)
 
+    accounts: list[Account] = []
+    for entry in data.get("accounts", []):
+        username = entry.get("username")
+        display_name = entry.get("display_name")
+        if not username or not display_name:
+            # Skip malformed entries rather than crashing
+            continue
+        has_snapshot = bool(entry.get("has_snapshot", False))
+        # Phase 2 additions — defensive .get() with defaults so Phase-1
+        # accounts.json (which lacks these keys) loads without error.
+        riot_id = entry.get("riot_id") or None
+        region = entry.get("region", "EUW")
+        puuid = entry.get("puuid") or None
+        rank_cache = entry.get("rank_cache") or None
+        rank_cache_ts = entry.get("rank_cache_ts") or None
+        accounts.append(Account(
+            username=username,
+            display_name=display_name,
+            has_snapshot=has_snapshot,
+            riot_id=riot_id,
+            region=region,
+            puuid=puuid,
+            rank_cache=rank_cache,
+            rank_cache_ts=rank_cache_ts,
+        ))
+
+    active_username = data.get("active_username") or None
+    return AppState(accounts=accounts, active_username=active_username)
+
+
+def _try_load(path: pathlib.Path) -> AppState | None:
+    """Return an AppState parsed from *path*, or None if it is missing,
+    unreadable, or malformed. Never raises."""
+    if not path.exists():
+        return None
     try:
-        raw = ACCOUNTS_JSON.read_text(encoding="utf-8")
-        data = json.loads(raw)
-
-        accounts: list[Account] = []
-        for entry in data.get("accounts", []):
-            username = entry.get("username")
-            display_name = entry.get("display_name")
-            if not username or not display_name:
-                # Skip malformed entries rather than crashing
-                continue
-            has_snapshot = bool(entry.get("has_snapshot", False))
-            # Phase 2 additions — defensive .get() with defaults so Phase-1
-            # accounts.json (which lacks these keys) loads without error.
-            riot_id = entry.get("riot_id") or None
-            region = entry.get("region", "EUW")
-            puuid = entry.get("puuid") or None
-            rank_cache = entry.get("rank_cache") or None
-            rank_cache_ts = entry.get("rank_cache_ts") or None
-            accounts.append(Account(
-                username=username,
-                display_name=display_name,
-                has_snapshot=has_snapshot,
-                riot_id=riot_id,
-                region=region,
-                puuid=puuid,
-                rank_cache=rank_cache,
-                rank_cache_ts=rank_cache_ts,
-            ))
-
-        active_username = data.get("active_username") or None
-
-        return AppState(accounts=accounts, active_username=active_username)
-
+        return _state_from_json(path.read_text(encoding="utf-8"))
     except Exception:
-        # Malformed / partial file — return safe default
-        return AppState()
+        return None
+
+
+def load_state() -> AppState:
+    """Load AppState from accounts.json, with automatic backup recovery.
+
+    Never raises — the caller can always rely on a valid AppState being
+    returned.  Returns an empty AppState on first run (no file).
+
+    Data-safety hardening (WR-01, after observed concurrent-write corruption):
+    if the primary file is corrupt, the corrupt copy is quarantined as
+    ``accounts.json.corrupt`` and the last known-good ``accounts.json.bak`` is
+    restored and returned when available — so a single bad write can no longer
+    silently wipe the configured account list.
+    """
+    primary = _try_load(ACCOUNTS_JSON)
+    if primary is not None:
+        return primary
+
+    # Primary missing or corrupt.
+    if ACCOUNTS_JSON.exists():
+        # Quarantine the corrupt file so it is not overwritten by the next save
+        # and remains available for manual recovery.
+        try:
+            os.replace(ACCOUNTS_JSON, _corrupt_path())
+        except OSError:
+            pass
+
+        # Attempt recovery from the rolling backup.
+        recovered = _try_load(_backup_path())
+        if recovered is not None:
+            # Restore the backup as the live file so the next save builds on a
+            # known-good base rather than starting empty.
+            try:
+                shutil.copy2(_backup_path(), ACCOUNTS_JSON)
+            except OSError:
+                pass
+            return recovered
+
+    return AppState()
 
 
 def save_state(state: AppState) -> None:
@@ -116,13 +165,37 @@ def save_state(state: AppState) -> None:
         "active_username": state.active_username,
     }
 
-    # Atomic write: serialise to a temp file in the same directory, then
-    # os.replace onto the target.  A crash/power-loss mid-write can only ever
-    # damage the temp file, never the live accounts.json — so a partial write
-    # can never silently wipe every configured account (WR-01).
-    tmp = ACCOUNTS_JSON.with_name(ACCOUNTS_JSON.name + ".tmp")
-    tmp.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+
+    # Roll the current known-good file into a backup BEFORE overwriting, so a
+    # later corrupt/partial write can be recovered on load. Only back up when
+    # the current file still parses — never overwrite a good backup with a bad
+    # file (that would destroy the only recovery source).
+    if ACCOUNTS_JSON.exists() and _try_load(ACCOUNTS_JSON) is not None:
+        try:
+            shutil.copy2(ACCOUNTS_JSON, _backup_path())
+        except OSError:
+            pass  # best-effort; a failed backup must not block the save
+
+    # Atomic write with a UNIQUE per-write temp file (via mkstemp) in the same
+    # directory, then os.replace onto the target. A crash/power-loss mid-write
+    # can only ever damage the temp file, never the live accounts.json (WR-01).
+    # The unique name is load-bearing: a fixed temp name let two concurrent
+    # app instances clobber the same temp file and leave trailing garbage —
+    # the observed corruption. mkstemp guarantees a distinct file per write.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(ACCOUNTS_JSON.parent), prefix="accounts.", suffix=".tmp",
     )
-    os.replace(tmp, ACCOUNTS_JSON)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, ACCOUNTS_JSON)
+    except BaseException:
+        # Never leave a stray temp file behind on failure.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
