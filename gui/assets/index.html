@@ -61,12 +61,14 @@
     --font-disp:'Chakra Petch',var(--font);
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
   body{
     background:var(--bg);
     color:var(--text);
     font-family:var(--font);
     -webkit-font-smoothing:antialiased;
-    padding:0;min-height:100vh;
+    padding:0;
+    overflow:hidden; /* App-Frame: nur .content scrollt, nie das Fenster selbst */
   }
   /* subtiler radialer Tiefen-Hintergrund */
   body::before{
@@ -74,7 +76,24 @@
     background:radial-gradient(120% 90% at 80% -10%,rgba(34,224,192,.06),transparent 55%),
                radial-gradient(120% 90% at 0% 0%,rgba(255,77,141,.05),transparent 50%);
   }
-  .app{position:relative;z-index:1;max-width:840px;margin:0 auto;padding:0}
+  /* App-Frame: Titelleiste oben + Statusleiste unten angepinnt (volle Breite),
+     dazwischen scrollt ausschließlich .content. Inhalt bleibt auf Lesebreite zentriert. */
+  .app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;padding:0}
+  .content{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}
+  .content-inner{max-width:840px;margin:0 auto;width:100%;padding-bottom:18px}
+
+  /* In-Window-Scrollbar (statt Windows-Standard) — schmal, dunkel, Mint beim Hover */
+  .content::-webkit-scrollbar{width:10px}
+  .content::-webkit-scrollbar-track{background:transparent}
+  .content::-webkit-scrollbar-thumb{
+    background:rgba(255,255,255,.12);border-radius:8px;
+    border:3px solid var(--bg);background-clip:padding-box;
+  }
+  .content::-webkit-scrollbar-thumb:hover{
+    background:rgba(34,224,192,.45);
+    border:3px solid var(--bg);background-clip:padding-box;
+  }
+  .content::-webkit-scrollbar-corner{background:transparent}
 
   /* ---- Titelleiste ---- */
   .titlebar{
@@ -234,7 +253,8 @@
   }
   .add:hover{color:var(--accent);border-color:rgba(34,224,192,.4);background:rgba(34,224,192,.04)}
   .statusbar{
-    margin:18px 0 0;padding:10px 26px;border-top:1px solid var(--border);
+    margin:0;padding:10px 26px;border-top:1px solid var(--border);
+    background:var(--bg); /* angepinnt unten — deckt scrollenden Inhalt ab */
     font-size:12px;color:var(--text-3);display:flex;align-items:center;gap:8px;flex-wrap:wrap;
   }
   /* Status-Dot (D-01/D-04) */
@@ -375,25 +395,29 @@
     </div>
   </div>
 
-  <div class="head">
-    <div>
-      <h1>Accounts</h1>
-      <div class="sub" id="subline">Lade&hellip;</div>
-    </div>
-    <div class="head-controls">
-      <span class="client-status offline" id="client-status"><span class="dot" aria-hidden="true"></span>Offline</span>
-      <button class="icon-btn" id="refreshBtn" title="Aktualisieren" aria-label="Aktualisieren">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+  <div class="content" id="content">
+    <div class="content-inner">
+      <div class="head">
+        <div>
+          <h1>Accounts</h1>
+          <div class="sub" id="subline">Lade&hellip;</div>
+        </div>
+        <div class="head-controls">
+          <span class="client-status offline" id="client-status"><span class="dot" aria-hidden="true"></span>Offline</span>
+          <button class="icon-btn" id="refreshBtn" title="Aktualisieren" aria-label="Aktualisieren">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="list" id="list"></div>
+
+      <button class="add" id="addBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        Account hinzuf&uuml;gen
       </button>
     </div>
   </div>
-
-  <div class="list" id="list"></div>
-
-  <button class="add" id="addBtn">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-    Account hinzuf&uuml;gen
-  </button>
 
   <div class="statusbar" id="statusbar" data-status="idle">
     <span class="dot" aria-hidden="true"></span>
