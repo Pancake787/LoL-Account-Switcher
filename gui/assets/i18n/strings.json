@@ -30,6 +30,10 @@
     "error.region_invalid": "Ungültige Region.",
     "error.api_key_invalid": "API-Key ungültig oder abgelaufen.",
     "error.api_key_network": "Netzwerkfehler bei der API-Key-Prüfung. Bitte erneut versuchen.",
+    "error.fill_required": "Bitte Anzeigename, Benutzername und Passwort ausfüllen.",
+    "error.new_name_required": "Bitte einen neuen Anzeigenamen eingeben.",
+    "error.api_key_required": "Bitte einen API-Key eingeben.",
+    "error.unknown": "Unbekannter Fehler",
 
     "riotapi.player_not_found": "Spieler nicht gefunden",
     "riotapi.key_unauthorized": "API-Key ungültig oder ohne Berechtigung",
@@ -37,6 +41,7 @@
     "riotapi.api_error": "API-Fehler {code}",
 
     "onboard.title": "Willkommen bei LoL Account Switcher",
+    "onboard.intro": "Hinterlege deinen persönlichen Riot API-Key, damit Rang-Daten angezeigt werden können. Das Wechseln zwischen Accounts funktioniert auch ohne Key.",
     "onboard.step1": "1. Gehe zu developer.riotgames.com und logge dich mit deinem Riot-Konto ein.",
     "onboard.step2": "2. Kopiere deinen persönlichen API-Schlüssel (Personal API Key).",
     "onboard.step3": "3. Füge ihn unten ein und speichere ihn.",
@@ -57,10 +62,15 @@
     "settings.close": "Schließen",
     "settings.key_valid": "API-Key gültig.",
     "settings.key_invalid": "API-Key ungültig oder abgelaufen.",
+    "settings.api_key_deleted": "API-Key gelöscht.",
 
     "update.available": "{tag} verfügbar",
 
     "card.no_api_key": "Kein API-Key",
+
+    "toast.password_copied": "Passwort kopiert — wird in 30s gelöscht",
+    "toast.no_password_stored": "Kein Passwort gespeichert",
+    "toast.copy_error": "Fehler beim Kopieren",
 
     "ui.app_title": "Accounts",
     "ui.loading": "Lade…",
@@ -69,6 +79,10 @@
     "ui.in_match": "Im Match",
     "ui.switching": "Wechsel läuft…",
     "ui.refresh": "Aktualisieren",
+    "ui.no_accounts": "Keine Accounts",
+    "ui.active": "aktiv",
+    "ui.empty_title": "Noch keine Accounts",
+    "ui.empty_hint": "Füg deinen ersten Account mit dem Button unten hinzu.",
     "ui.settings": "Einstellungen",
     "ui.login_done": "Login fertig",
     "ui.cancel": "Abbrechen",
@@ -122,6 +136,10 @@
     "error.region_invalid": "Invalid region.",
     "error.api_key_invalid": "API key invalid or expired.",
     "error.api_key_network": "Network error while checking the API key. Please try again.",
+    "error.fill_required": "Please fill in display name, username, and password.",
+    "error.new_name_required": "Please enter a new display name.",
+    "error.api_key_required": "Please enter an API key.",
+    "error.unknown": "Unknown error",
 
     "riotapi.player_not_found": "Player not found",
     "riotapi.key_unauthorized": "API key invalid or unauthorized",
@@ -129,6 +147,7 @@
     "riotapi.api_error": "API error {code}",
 
     "onboard.title": "Welcome to LoL Account Switcher",
+    "onboard.intro": "Add your personal Riot API key so rank data can be shown. Switching between accounts also works without a key.",
     "onboard.step1": "1. Go to developer.riotgames.com and sign in with your Riot account.",
     "onboard.step2": "2. Copy your Personal API Key.",
     "onboard.step3": "3. Paste it below and save it.",
@@ -149,10 +168,15 @@
     "settings.close": "Close",
     "settings.key_valid": "API key is valid.",
     "settings.key_invalid": "API key invalid or expired.",
+    "settings.api_key_deleted": "API key deleted.",
 
     "update.available": "{tag} available",
 
     "card.no_api_key": "No API key",
+
+    "toast.password_copied": "Password copied — will be cleared in 30s",
+    "toast.no_password_stored": "No password stored",
+    "toast.copy_error": "Error while copying",
 
     "ui.app_title": "Accounts",
     "ui.loading": "Loading…",
@@ -161,6 +185,10 @@
     "ui.in_match": "In match",
     "ui.switching": "Switching…",
     "ui.refresh": "Refresh",
+    "ui.no_accounts": "No accounts",
+    "ui.active": "active",
+    "ui.empty_title": "No accounts yet",
+    "ui.empty_hint": "Add your first account with the button below.",
     "ui.settings": "Settings",
     "ui.login_done": "Login done",
     "ui.cancel": "Cancel",

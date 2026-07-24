@@ -369,6 +369,110 @@ class TestJsWiringContentGates(unittest.TestCase):
         self.assertGreaterEqual(self._index_html_text().count("data-i18n"), 8)
 
 
+class TestWr02LiveRetranslationCoverage(unittest.TestCase):
+    """08-REVIEW.md WR-02 regression guard: the specific hardcoded German
+    literals the review found in renderClientStatus/renderEmptyState/
+    renderSubline and the modal error/success/toast call sites must never
+    reappear as raw string literals passed to innerHTML/textContent/
+    showModalError/showModalSuccess/showToast — they must be routed through
+    t()/catalog keys instead."""
+
+    _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+    def _app_js_text(self) -> str:
+        return (self._REPO_ROOT / "gui" / "assets" / "app.js").read_text(encoding="utf-8")
+
+    #: The exact hardcoded-literal call sites the review cited (WR-02).
+    _FORBIDDEN_LITERALS = [
+        "'Wechsel läuft…'",
+        "'Im Match'",
+        "'Client läuft'",
+        "'Offline'",
+        "'Keine Accounts'",
+        "Noch keine Accounts",
+        "Füg deinen ersten Account",
+        "'Bitte Anzeigename, Benutzername und Passwort ausfüllen.'",
+        "'Bitte einen neuen Anzeigenamen eingeben.'",
+        "'Bitte einen API-Key eingeben.'",
+        "'Unbekannter Fehler'",
+        "'API-Key gespeichert.'",
+        "'API-Key gelöscht.'",
+        "'Passwort kopiert — wird in 30s gelöscht'",
+        "'Kein Passwort gespeichert'",
+        "'Fehler beim Kopieren'",
+    ]
+
+    def test_no_hardcoded_german_literals_remain_in_rerender_paths(self) -> None:
+        text = self._app_js_text()
+        offenders = [lit for lit in self._FORBIDDEN_LITERALS if lit in text]
+        self.assertEqual(
+            offenders,
+            [],
+            f"Hardcoded German literal(s) still present in app.js (WR-02): {offenders}",
+        )
+
+    #: Every new catalog key introduced to close WR-02 — must resolve in
+    #: BOTH languages (mirrors TestControllerEmittedKeyParity below).
+    _WR02_NEW_KEYS = [
+        "error.fill_required", "error.new_name_required", "error.api_key_required",
+        "error.unknown", "settings.api_key_deleted",
+        "toast.password_copied", "toast.no_password_stored", "toast.copy_error",
+        "ui.no_accounts", "ui.active", "ui.empty_title", "ui.empty_hint",
+    ]
+
+    def test_wr02_new_keys_present_in_both_languages(self) -> None:
+        i18n.reload()
+        for key in self._WR02_NEW_KEYS:
+            self.assertIn(key, i18n._STRINGS.get("de", {}), f"{key} missing from de catalog")
+            self.assertIn(key, i18n._STRINGS.get("en", {}), f"{key} missing from en catalog")
+
+    def test_wr02_new_keys_referenced_from_app_js(self) -> None:
+        """Guards against a key existing in the catalog but never actually
+        wired to a call site (the exact gap IN-04 warns weak tests miss)."""
+        text = self._app_js_text()
+        for key in self._WR02_NEW_KEYS:
+            self.assertIn(f"t('{key}')", text, f"{key} is not referenced via t(...) in app.js")
+
+    def test_apply_language_translates_placeholder_attributes(self) -> None:
+        """WR-03: applyLanguage() must also resolve [data-i18n-placeholder]
+        elements' placeholder attribute, not just [data-i18n] textContent."""
+        text = self._app_js_text()
+        self.assertIn("data-i18n-placeholder", text)
+        self.assertIn(".placeholder = t(", text)
+
+
+class TestWr03WelcomeDialogTranslationCoverage(unittest.TestCase):
+    """08-REVIEW.md WR-03 regression guard: the welcome dialog's actual
+    instructional copy (intro paragraph + steps 2/3 + key input placeholder)
+    must be wired via data-i18n/data-i18n-placeholder, not hardcoded German —
+    otherwise an English-locale first-run user sees a partially-German
+    onboarding dialog, defeating ONBOARD-01's stranger-onboarding goal."""
+
+    _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+    def _index_html_text(self) -> str:
+        return (self._REPO_ROOT / "gui" / "assets" / "index.html").read_text(encoding="utf-8")
+
+    def test_welcome_intro_has_data_i18n(self) -> None:
+        self.assertIn('data-i18n="onboard.intro"', self._index_html_text())
+
+    def test_welcome_step2_and_step3_are_wired(self) -> None:
+        text = self._index_html_text()
+        self.assertIn('data-i18n="onboard.step2"', text)
+        self.assertIn('data-i18n="onboard.step3"', text)
+
+    def test_welcome_api_key_placeholder_uses_catalog_key(self) -> None:
+        self.assertIn(
+            'data-i18n-placeholder="onboard.key_placeholder"',
+            self._index_html_text(),
+        )
+
+    def test_onboard_intro_key_present_in_both_languages(self) -> None:
+        i18n.reload()
+        self.assertIn("onboard.intro", i18n._STRINGS.get("de", {}))
+        self.assertIn("onboard.intro", i18n._STRINGS.get("en", {}))
+
+
 class TestControllerEmittedKeyParity(unittest.TestCase):
     """Key-drift parity (Plan 08-05 Task 2): every status.*/error.*/riotapi.*
     key the controller can emit must exist in BOTH `de` and `en` catalogs —

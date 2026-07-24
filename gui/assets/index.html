@@ -649,18 +649,18 @@
 <div class="modal-overlay" id="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-modal-title">
   <div class="modal">
     <h2 id="welcome-modal-title" data-i18n="onboard.title">Willkommen!</h2>
-    <div class="modal-confirm-body">
+    <div class="modal-confirm-body" data-i18n="onboard.intro">
       Hinterlege deinen pers&ouml;nlichen Riot API-Key, damit Rang-Daten angezeigt werden k&ouml;nnen.
       Das Wechseln zwischen Accounts funktioniert auch ohne Key.
     </div>
     <ol class="welcome-steps">
       <li><a id="welcome-dev-link" data-i18n="onboard.link_label">developer.riotgames.com &ouml;ffnen</a></li>
-      <li>Mit deinem Riot-Account einloggen</li>
-      <li>Den &bdquo;Personal API Key&ldquo; kopieren</li>
+      <li data-i18n="onboard.step2">2. Kopiere deinen pers&ouml;nlichen API-Schl&uuml;ssel (Personal API Key).</li>
+      <li data-i18n="onboard.step3">3. F&uuml;ge ihn unten ein und speichere ihn.</li>
     </ol>
     <div class="modal-field">
       <label for="welcome-api-key" data-i18n="settings.api_key_label">Riot API-Key</label>
-      <input type="password" id="welcome-api-key" placeholder="RGAPI-..." autocomplete="off">
+      <input type="password" id="welcome-api-key" data-i18n-placeholder="onboard.key_placeholder" placeholder="RGAPI-..." autocomplete="off">
     </div>
     <div class="modal-error" id="welcome-error"></div>
     <div class="modal-actions">

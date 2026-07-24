@@ -81,6 +81,14 @@ function applyLanguage(lang) {
   document.querySelectorAll('[data-i18n]').forEach(el => {
     el.textContent = t(el.dataset.i18n);
   });
+  // WR-03: [data-i18n] only ever sets textContent, which does nothing for an
+  // <input>'s placeholder attribute. A separate [data-i18n-placeholder]
+  // attribute lets any input opt into live placeholder translation (e.g. the
+  // welcome dialog's API-key field) without touching every other modal's
+  // placeholders in this same pass.
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.dataset.i18nPlaceholder);
+  });
   // Re-render dynamic content (status bar text, rank-tile "Kein API-Key"
   // hint, etc.) now that currentLang has changed. render()'s own
   // language-change check below will see state.language === currentLang
@@ -323,8 +331,8 @@ function retrySwitch() {
 function renderEmptyState(listEl) {
   listEl.innerHTML = `<div class="empty-state">
     <div class="empty-icon">&#128100;</div>
-    <p>Noch keine Accounts</p>
-    <span>F&uuml;g deinen ersten Account mit dem Button unten hinzu.</span>
+    <p>${esc(t('ui.empty_title'))}</p>
+    <span>${esc(t('ui.empty_hint'))}</span>
   </div>`;
 }
 
@@ -586,14 +594,14 @@ async function submitAddAccount() {
   const region      = document.getElementById('add-region').value;
 
   if (!displayName || !username || !password) {
-    showModalError('add-account-modal', 'Bitte Anzeigename, Benutzername und Passwort ausfüllen.');
+    showModalError('add-account-modal', t('error.fill_required'));
     return;
   }
 
   try {
     const result = await pywebview.api.add_account(displayName, username, password, riotId, region);
     if (result.ok === false) {
-      showModalError('add-account-modal', result.error || 'Unbekannter Fehler');
+      showModalError('add-account-modal', result.error || t('error.unknown'));
     } else {
       closeModal('add-account-modal');
       // Clear fields for next open
@@ -616,14 +624,14 @@ async function submitRename() {
   const newName     = document.getElementById('rename-display-name').value.trim();
 
   if (!newName) {
-    showModalError('rename-modal', 'Bitte einen neuen Anzeigenamen eingeben.');
+    showModalError('rename-modal', t('error.new_name_required'));
     return;
   }
 
   try {
     const result = await pywebview.api.rename_account(username, newName);
     if (result.ok === false) {
-      showModalError('rename-modal', result.error || 'Unbekannter Fehler');
+      showModalError('rename-modal', result.error || t('error.unknown'));
     } else {
       closeModal('rename-modal');
     }
@@ -644,7 +652,7 @@ async function submitEditRiotId() {
   try {
     const result = await pywebview.api.set_riot_id(username, riotId, region);
     if (result.ok === false) {
-      showModalError('edit-riot-id-modal', result.error || 'Unbekannter Fehler');
+      showModalError('edit-riot-id-modal', result.error || t('error.unknown'));
     } else {
       closeModal('edit-riot-id-modal');
     }
@@ -700,21 +708,21 @@ async function submitSaveApiKey(modalId) {
   const key = input ? input.value.trim() : '';
 
   if (!key) {
-    showModalError(modalId, 'Bitte einen API-Key eingeben.');
+    showModalError(modalId, t('error.api_key_required'));
     return;
   }
 
   try {
     const result = await pywebview.api.save_api_key(key);
     if (result.ok === false) {
-      showModalError(modalId, result.error || 'Unbekannter Fehler');
+      showModalError(modalId, result.error || t('error.unknown'));
       return;
     }
     if (input) input.value = '';
     if (modalId === 'welcome-modal') {
       closeModal('welcome-modal');
     } else {
-      showModalSuccess(modalId, 'API-Key gespeichert.');
+      showModalSuccess(modalId, t('status.api_key_saved'));
       const masked = await pywebview.api.get_api_key_masked();
       const keyField = document.getElementById('settings-api-key');
       if (keyField) keyField.value = masked;
@@ -735,7 +743,7 @@ async function deleteApiKey() {
     const masked = await pywebview.api.get_api_key_masked();
     const keyField = document.getElementById('settings-api-key');
     if (keyField) keyField.value = masked;
-    showModalSuccess('settings-modal', 'API-Key gelöscht.');
+    showModalSuccess('settings-modal', t('settings.api_key_deleted'));
   } catch (err) {
     showModalError('settings-modal', String(err));
   }
@@ -1037,18 +1045,18 @@ function renderClientStatus(state) {
 
   if (state.status === 'switching') {
     el.className = 'client-status neutral';
-    el.innerHTML = '<span class="dot" aria-hidden="true"></span>Wechsel läuft…';
+    el.innerHTML = `<span class="dot" aria-hidden="true"></span>${esc(t('ui.switching'))}`;
     return;
   }
   if (state.game_live) {
     el.className = 'client-status live';
-    el.innerHTML = '<span class="dot" aria-hidden="true"></span>Im Match';
+    el.innerHTML = `<span class="dot" aria-hidden="true"></span>${esc(t('ui.in_match'))}`;
   } else if (state.client_running) {
     el.className = 'client-status running';
-    el.innerHTML = '<span class="dot" aria-hidden="true"></span>Client läuft';
+    el.innerHTML = `<span class="dot" aria-hidden="true"></span>${esc(t('ui.client_running'))}`;
   } else {
     el.className = 'client-status offline';
-    el.innerHTML = '<span class="dot" aria-hidden="true"></span>Offline';
+    el.innerHTML = `<span class="dot" aria-hidden="true"></span>${esc(t('ui.offline'))}`;
   }
 }
 
@@ -1093,13 +1101,13 @@ function renderSubline(accounts, activeUsername) {
   }
 
   if (count === 0) {
-    subEl.textContent = 'Keine Accounts';
+    subEl.textContent = t('ui.no_accounts');
     return;
   }
 
   // CR-01 / IN-03: activeName derives from display_name — escape it (this is an
   // innerHTML sink).  Only the count segment needs no escaping (it is a number).
-  const activeStr = activeName ? ` · ${esc(activeName)} aktiv` : '';
+  const activeStr = activeName ? ` · ${esc(activeName)} ${esc(t('ui.active'))}` : '';
   subEl.innerHTML = `${count} Account${count !== 1 ? 's' : ''}${activeStr}`;
 }
 
@@ -1182,13 +1190,13 @@ async function copyPassword(username) {
   try {
     const result = await pywebview.api.copy_password(username);
     if (result && result.ok) {
-      showToast('Passwort kopiert — wird in 30s gelöscht');
+      showToast(t('toast.password_copied'));
     } else {
-      showToast('Kein Passwort gespeichert');
+      showToast(t('toast.no_password_stored'));
     }
   } catch (err) {
     console.error('[app.js] copy_password error', err);
-    showToast('Fehler beim Kopieren');
+    showToast(t('toast.copy_error'));
   }
 }
 
