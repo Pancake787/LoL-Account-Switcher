@@ -1710,5 +1710,144 @@ class TestControllerRecaptureSession(unittest.TestCase):
                     p.stop()
 
 
+class TestControllerRegionWhitelist(unittest.TestCase):
+    """Unit tests for the region-whitelist guard in add_account/set_riot_id
+    (T-08-08 / Pitfall 5, Plan 08-03 Task 1).
+    """
+
+    def _make_controller_ctx(self, tmp_path: pathlib.Path):
+        fake_root = _FakeTkRoot()
+        patcher_app = patch.object(config, "APP_DIR", tmp_path)
+        patcher_json = patch.object(config, "ACCOUNTS_JSON", tmp_path / "accounts.json")
+        patcher_sessions = patch.object(config, "SESSIONS_DIR", tmp_path / "sessions")
+        patcher_app.start()
+        patcher_json.start()
+        patcher_sessions.start()
+        config.ensure_dirs()
+        ctrl = controller_module.Controller(fake_root)
+        ctrl._fake_root = fake_root
+        self._ctrls.append(ctrl)
+        return ctrl, [patcher_app, patcher_json, patcher_sessions]
+
+    def setUp(self):
+        _fake_keyring.reset()
+        self._ctrls = []
+
+    def tearDown(self):
+        for ctrl in self._ctrls:
+            ctrl.shutdown()
+
+    def test_add_account_rejects_unknown_region(self):
+        """add_account(..., region="NOPE") raises ValueError and does not persist
+        the account (whitelist reject BEFORE any Riot API call — Pitfall 5).
+
+        NOTE: uses a dedicated username (not shared with other tests in this
+        class) — credential_store's fake keyring backend is a module-level
+        singleton that a sibling test file (test_accounts_watch.py /
+        test_rank_flow.py) force-reloads and rebinds at collection time, so a
+        username reused across tests in this file is not reliably cleared
+        between test methods when the full suite runs.
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            ctrl, patchers = self._make_controller_ctx(tmp_path)
+            try:
+                with patch("rank_service.resolve_puuid") as mock_resolve:
+                    with self.assertRaises(ValueError):
+                        ctrl.add_account("Main", "region_reject_user", "pw1", region="NOPE")
+                    mock_resolve.assert_not_called()
+                self.assertEqual(len(ctrl.state.accounts), 0)
+                self.assertFalse(bool(credential_store.get("region_reject_user")))
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_add_account_accepts_kr_and_threads_platform_id(self):
+        """A mocked add_account with region="KR" calls resolve_puuid with
+        platform_id="KR" (proving region is threaded, not hardcoded EUW1)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            ctrl, patchers = self._make_controller_ctx(tmp_path)
+            try:
+                credential_store.save_api_key("test-key")
+                with patch("rank_service.resolve_puuid", return_value="puuid-kr") as mock_resolve:
+                    ctrl.add_account(
+                        "Main", "region_kr_user", "pw1",
+                        riot_id="Main#KR1", region="KR",
+                    )
+                    mock_resolve.assert_called_once_with(
+                        "Main", "KR1", "test-key", platform_id="KR"
+                    )
+                acc = ctrl.state.accounts[0]
+                self.assertEqual(acc.region, "KR")
+                self.assertEqual(acc.puuid, "puuid-kr")
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_set_riot_id_accepts_lowercase_region_case_insensitively(self):
+        """set_riot_id(..., region="euw1") is accepted (case-insensitive membership)
+        and, when it resolves a PUUID, resolve_puuid is called with platform_id
+        equal to the canonical region."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            ctrl, patchers = self._make_controller_ctx(tmp_path)
+            try:
+                ctrl.add_account("Main", "region_case_user", "pw1")
+                credential_store.save_api_key("test-key")
+                with patch("rank_service.resolve_puuid", return_value="puuid-euw") as mock_resolve:
+                    ctrl.set_riot_id("region_case_user", "Main#EUW", "euw1")
+                    mock_resolve.assert_called_once_with(
+                        "Main", "EUW", "test-key", platform_id="EUW1"
+                    )
+                acc = ctrl.state.accounts[0]
+                self.assertEqual(acc.region, "EUW1")
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_set_riot_id_rejects_unknown_region(self):
+        """set_riot_id(..., region="NOPE") raises ValueError and does not mutate
+        the account's riot_id/region/puuid."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            ctrl, patchers = self._make_controller_ctx(tmp_path)
+            try:
+                ctrl.add_account("Main", "region_setriot_reject_user", "pw1")
+                acc_before = ctrl.state.accounts[0]
+                old_riot_id = acc_before.riot_id
+                old_region = acc_before.region
+
+                with patch("rank_service.resolve_puuid") as mock_resolve:
+                    with self.assertRaises(ValueError):
+                        ctrl.set_riot_id("region_setriot_reject_user", "Main#EUW", "NOPE")
+                    mock_resolve.assert_not_called()
+
+                acc = ctrl.state.accounts[0]
+                self.assertEqual(acc.riot_id, old_riot_id)
+                self.assertEqual(acc.region, old_region)
+            finally:
+                for p in patchers:
+                    p.stop()
+
+    def test_add_account_legacy_euw_alias_still_accepted(self):
+        """add_account(..., region="EUW") (legacy bare alias) is still accepted
+        and normalized to the canonical "EUW1" (backward compat, Pitfall 2)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            ctrl, patchers = self._make_controller_ctx(tmp_path)
+            try:
+                ctrl.add_account("Main", "region_legacy_user", "pw1", region="EUW")
+                self.assertEqual(ctrl.state.accounts[0].region, "EUW1")
+            finally:
+                for p in patchers:
+                    p.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

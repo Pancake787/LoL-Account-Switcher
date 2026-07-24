@@ -299,7 +299,9 @@ class TestRiotIdValidation(unittest.TestCase):
         ctrl.add_account("Main", "player1", "secret")
         acc = ctrl.state.accounts[0]
         self.assertIsNone(acc.riot_id)
-        self.assertEqual(acc.region, "EUW")
+        # Phase 8 (T-08-08): the "EUW" default is normalized to canonical "EUW1"
+        # by the region-whitelist check in add_account.
+        self.assertEqual(acc.region, "EUW1")
 
     def test_add_account_riot_id_with_api_key_resolves_puuid(self):
         """With a present API key, add_account resolves puuid via rank_service."""
@@ -315,7 +317,11 @@ class TestRiotIdValidation(unittest.TestCase):
 
         with patch("rank_service.resolve_puuid", return_value="fake-puuid-xyz") as mock_resolve:
             ctrl.add_account("Main", "player1", "password", riot_id="Main#EUW", region="EUW")
-            mock_resolve.assert_called_once_with("Main", "EUW", "test-api-key-123")
+            # Phase 8 (T-08-08): region is normalized ("EUW"->"EUW1") and threaded
+            # into resolve_puuid as platform_id (account-v1 routing).
+            mock_resolve.assert_called_once_with(
+                "Main", "EUW", "test-api-key-123", platform_id="EUW1"
+            )
 
         acc = ctrl.state.accounts[0]
         self.assertEqual(acc.puuid, "fake-puuid-xyz")
@@ -427,7 +433,9 @@ class TestRiotIdValidation(unittest.TestCase):
         with patch("rank_service.resolve_puuid", return_value="puuid-strip") as mock_resolve:
             ctrl.add_account("Main", "player1", "password",
                              riot_id="  Main  #  EUW  ", region="EUW")
-            mock_resolve.assert_called_once_with("Main", "EUW", "test-api-key")
+            mock_resolve.assert_called_once_with(
+                "Main", "EUW", "test-api-key", platform_id="EUW1"
+            )
 
     def test_add_account_riot_id_no_api_key_stores_with_none_puuid(self):
         """With riot_id but no API key: account stored with puuid=None, no error."""
@@ -445,7 +453,7 @@ class TestRiotIdValidation(unittest.TestCase):
         acc = ctrl.state.accounts[0]
         self.assertIsNone(acc.puuid)
         self.assertEqual(acc.riot_id, "Main#EUW")
-        self.assertEqual(acc.region, "EUW")
+        self.assertEqual(acc.region, "EUW1")
 
     def test_add_account_riot_id_path_separator_rejected(self):
         """Riot-ID containing path separator '/' or '\\' is rejected (T-02-08)."""
@@ -477,7 +485,7 @@ class TestRiotIdValidation(unittest.TestCase):
         ctrl.set_riot_id("player1", "Main#EUW", "EUW")
         acc = ctrl.state.accounts[0]
         self.assertEqual(acc.riot_id, "Main#EUW")
-        self.assertEqual(acc.region, "EUW")
+        self.assertEqual(acc.region, "EUW1")
         # username and has_snapshot must be unchanged
         self.assertEqual(acc.username, "player1")
         self.assertFalse(acc.has_snapshot)
@@ -940,11 +948,11 @@ class TestSetRiotIdEditPath(unittest.TestCase):
         with patch("rank_service.resolve_puuid", return_value="puuid-edit-001") as mock_r, \
              patch.object(ctrl, "_trigger_rank_refresh"):
             ctrl.set_riot_id("player1", "Main#EUW", "EUW")
-            mock_r.assert_called_once_with("Main", "EUW", "my-key")
+            mock_r.assert_called_once_with("Main", "EUW", "my-key", platform_id="EUW1")
 
         acc = ctrl.state.accounts[0]
         self.assertEqual(acc.riot_id, "Main#EUW")
-        self.assertEqual(acc.region, "EUW")
+        self.assertEqual(acc.region, "EUW1")
         self.assertEqual(acc.puuid, "puuid-edit-001")
         # username and has_snapshot must be unchanged
         self.assertEqual(acc.username, "player1")

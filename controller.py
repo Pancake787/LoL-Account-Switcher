@@ -332,11 +332,14 @@ class Controller:
             username:     Riot username — unique identifier, immutable after creation.
             password:     Account password — stored ONLY in Windows Credential Manager.
             riot_id:      Optional Riot-ID "gameName#tagLine" (e.g. "Main#EUW").
-            region:       "EUW" or "EUNE" (default "EUW").
+            region:       Any canonical Riot platform id (e.g. "EUW1", "NA1", "KR")
+                          or the legacy bare "EUW"/"EUNE" strings (auto-normalized).
+                          Default "EUW" (normalized to "EUW1").
 
         Raises:
             ValueError: If any required field is empty/whitespace, ``username``
                         already exists, ``riot_id`` contains path separators (T-02-08),
+                        ``region`` is not a recognized platform id (T-08-08 / Pitfall 5),
                         or the API returns 404 for the Riot-ID.
         """
         if not display_name or not display_name.strip():
@@ -375,6 +378,16 @@ class Controller:
                     "Riot-ID darf keine Schrägstriche (/ oder \\) enthalten."
                 )
 
+        # T-08-08 / Pitfall 5 (ASVS V5): whitelist the region BEFORE any Riot API
+        # host is built. Case-insensitive; legacy bare "EUW"/"EUNE" strings are
+        # normalized to their canonical platform id (mirrors rank_service.
+        # platform_host's defensive alias normalization) rather than silently
+        # defaulting to EUW. Anything else outside PLATFORM_TO_REGIONAL is rejected.
+        region_upper = region.strip().upper()
+        region = rank_service._LEGACY_PLATFORM_ALIASES.get(region_upper, region_upper)
+        if region not in rank_service.PLATFORM_TO_REGIONAL:
+            raise ValueError("Ungültige Region ausgewählt.")
+
         # Phase 2: resolve PUUID if riot_id provided and API key is present (D-19).
         # WR-04: PUUID resolution runs BEFORE the credential is stored — resolution
         # does not need the stored credential, so a resolution failure (404 /
@@ -396,7 +409,9 @@ class Controller:
                         "Riot-ID muss das Format 'Spielername#Tag' haben (z.B. Main#EUW)."
                     )
                 try:
-                    puuid = rank_service.resolve_puuid(game_name, tag_line, api_key)
+                    puuid = rank_service.resolve_puuid(
+                        game_name, tag_line, api_key, platform_id=region
+                    )
                 except rank_service.RiotAPIError as exc:
                     if exc.status_code == 404:
                         raise ValueError(
@@ -591,11 +606,13 @@ class Controller:
         Args:
             username: Riot username of the existing account to edit.
             riot_id:  New Riot-ID "gameName#tagLine" or None to clear.
-            region:   "EUW" or "EUNE".
+            region:   Any canonical Riot platform id (e.g. "EUW1", "NA1", "KR")
+                      or the legacy bare "EUW"/"EUNE" strings (auto-normalized).
 
         Raises:
-            ValueError: If ``riot_id`` contains path separators (T-02-08) or the
-                        API returns 404 for the Riot-ID.
+            ValueError: If ``riot_id`` contains path separators (T-02-08),
+                        ``region`` is not a recognized platform id (T-08-08 /
+                        Pitfall 5), or the API returns 404 for the Riot-ID.
         """
         if riot_id:
             riot_id = riot_id.strip()
@@ -603,6 +620,13 @@ class Controller:
                 raise ValueError(
                     "Riot-ID darf keine Schrägstriche (/ oder \\) enthalten."
                 )
+
+        # T-08-08 / Pitfall 5 (ASVS V5): whitelist the region BEFORE any Riot API
+        # host is built — see add_account for the identical rationale/shape.
+        region_upper = region.strip().upper()
+        region = rank_service._LEGACY_PLATFORM_ALIASES.get(region_upper, region_upper)
+        if region not in rank_service.PLATFORM_TO_REGIONAL:
+            raise ValueError("Ungültige Region ausgewählt.")
 
         puuid: Optional[str] = None
         if riot_id:
@@ -620,7 +644,9 @@ class Controller:
                         "Riot-ID muss das Format 'Spielername#Tag' haben (z.B. Main#EUW)."
                     )
                 try:
-                    puuid = rank_service.resolve_puuid(game_name, tag_line, api_key)
+                    puuid = rank_service.resolve_puuid(
+                        game_name, tag_line, api_key, platform_id=region
+                    )
                 except rank_service.RiotAPIError as exc:
                     if exc.status_code == 404:
                         raise ValueError("Riot-ID nicht gefunden. Tippfehler?") from exc
