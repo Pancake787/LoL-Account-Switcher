@@ -2,11 +2,12 @@
 
 Module boundary (mirrors rank_service.py / status_poller.py): imports ONLY
 requests + stdlib (time, json — json is unused directly, kept implicit via
-requests.Response.json()). MUST NOT import gui/controller/credential_store/
-config. This module MUST NOT be imported from the CLI/headless switch path
-(main.py switch branch / core.py) — the Phase-7 CI import gate protects the
-webview boundary; this module is only ever imported from the GUI startup path
-(wired in Plan 08-06).
+requests.Response.json()) plus the standalone, dependency-free ``version``
+module (WR-01 — single source of truth for APP_VERSION). MUST NOT import
+gui/controller/credential_store/config. This module MUST NOT be imported
+from the CLI/headless switch path (main.py switch branch / core.py) — the
+Phase-7 CI import gate protects the webview boundary; this module is only
+ever imported from the GUI startup path (wired in Plan 08-06).
 
 Design (RESEARCH.md Pattern 4 / Pitfall 4):
 - The real throttle is an app-level TTL (CHECK_TTL_S), NOT HTTP ETag/304
@@ -27,9 +28,14 @@ import time
 import requests
 import requests.exceptions
 
-#: Canonical current app version — the sole in-code version constant, to be
-#: reconciled with the installer's AppVersion at release time.
-APP_VERSION: str = "2.1.0"
+from version import APP_VERSION
+
+#: Canonical current app version, re-exported here for backward compatibility
+#: with existing call sites (``update_checker.APP_VERSION``). The single
+#: source of truth is ``version.APP_VERSION`` (WR-01) — kept in lockstep with
+#: installer/LoLSwitcher.iss's ``AppVersion=`` and enforced by
+#: tests/test_version_sync.py. Do not hardcode a duplicate value here.
+__all__ = ["APP_VERSION", "REPO", "CHECK_TTL_S", "check_for_update"]
 
 #: Hardcoded owner/repo — never derived from user input (no SSRF surface, T-08-04).
 REPO: str = "Pancake787/LoL-Account-Switcher"
