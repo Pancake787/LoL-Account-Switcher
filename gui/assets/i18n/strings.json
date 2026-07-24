@@ -67,6 +67,11 @@
     "update.available": "{tag} verfügbar",
 
     "card.no_api_key": "Kein API-Key",
+    "card.active": "Aktiv",
+    "card.switch": "Wechseln",
+    "card.session_warning": "Session evtl. abgelaufen",
+    "card.no_api_key_title": "API-Key in den Einstellungen hinterlegen",
+    "card.drag_title": "Verschieben",
 
     "toast.password_copied": "Passwort kopiert — wird in 30s gelöscht",
     "toast.no_password_stored": "Kein Passwort gespeichert",
@@ -173,6 +178,11 @@
     "update.available": "{tag} available",
 
     "card.no_api_key": "No API key",
+    "card.active": "Active",
+    "card.switch": "Switch",
+    "card.session_warning": "Session may have expired",
+    "card.no_api_key_title": "Set your API key in Settings",
+    "card.drag_title": "Drag to reorder",
 
     "toast.password_copied": "Password copied — will be cleared in 30s",
     "toast.no_password_stored": "No password stored",

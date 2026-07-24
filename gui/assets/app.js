@@ -395,7 +395,7 @@ function rankRow(rankData, queueLabel, stale, noApiKey) {
   // instead of "Unranked", parallel to the empty-state branch below. Keeps
   // the two-tile grid layout intact (still a `.rank` element).
   if (noApiKey) {
-    return `<div class="rank no-api-key" data-open-settings="1" title="API-Key in den Einstellungen hinterlegen">
+    return `<div class="rank no-api-key" data-open-settings="1" title="${esc(t('card.no_api_key_title'))}">
       <div class="info">
         <div class="queue">${esc(queueLabel)}</div>
         <div class="tier">${esc(t('card.no_api_key'))}</div>
@@ -461,11 +461,11 @@ function card(acc, activeUsername, switching, noApiKey) {
   const disabled = switching ? ' disabled' : '';
 
   const switchBtn = isActive
-    ? `<button class="btn-switch is-active" disabled>${ICON.check} Aktiv</button>`
-    : `<button class="btn-switch"${disabled} data-switch="${esc(acc.username)}">${ICON.switch} Wechseln</button>`;
+    ? `<button class="btn-switch is-active" disabled>${ICON.check} ${esc(t('card.active'))}</button>`
+    : `<button class="btn-switch"${disabled} data-switch="${esc(acc.username)}">${ICON.switch} ${esc(t('card.switch'))}</button>`;
 
   const statusPill = isActive
-    ? `<span class="status"><span class="dot"></span> Aktiv</span>`
+    ? `<span class="status"><span class="dot"></span> ${esc(t('card.active'))}</span>`
     : '';
 
   // IGN = riot_id if set, otherwise fall back to username
@@ -477,7 +477,7 @@ function card(acc, activeUsername, switching, noApiKey) {
   // #client-status indicator (STATUS-01) and the error-red status bar
   // (Pitfall 4) — muted/informational styling, not alarming.
   const sessionWarningHtml = acc.session_warning
-    ? `<div class="session-warning">Session evtl. abgelaufen</div>`
+    ? `<div class="session-warning">${esc(t('card.session_warning'))}</div>`
     : '';
 
   // Build rank tiles — D-07: ALWAYS both tiles (Solo/Duo + Flex), regardless
@@ -495,7 +495,7 @@ function card(acc, activeUsername, switching, noApiKey) {
   return `<div class="card${isActive ? ' active' : ''}" data-username="${esc(acc.username)}">
     <div class="card-top">
       <div style="display:flex;align-items:flex-start;gap:8px;min-width:0">
-        <span class="drag-handle" title="Verschieben">&#8801;</span>
+        <span class="drag-handle" title="${esc(t('card.drag_title'))}">&#8801;</span>
         <div class="who">
           <div class="name-row"><span class="name">${esc(acc.display_name)}</span>${statusPill}</div>
           <div class="ign">${esc(ign)} <span class="region-badge">${esc(acc.region)}</span></div>
@@ -1373,8 +1373,16 @@ window.addEventListener('pywebviewready', function () {
   // one. A fetch failure degrades to raw-key fallback (A1) rather than
   // blocking startup — loadStrings() never rejects.
   loadStrings().then(function () {
-    // Initial render from the state that on_webview_ready() just pushed
-    render(pywebview.state);
+    // Startup-race fix: the on_webview_ready() state push above can fire the
+    // 'change' listener — and thus render()/applyLanguage() — BEFORE this
+    // fetch resolves, i.e. with an empty I18N catalog. That first pass freezes
+    // every static [data-i18n] label on its raw key AND advances currentLang,
+    // so render()'s language-change guard never re-fires applyLanguage() once
+    // the catalog loads. Force a re-translation here, unconditionally, now that
+    // I18N is populated — applyLanguage() re-queries all [data-i18n] /
+    // [data-i18n-placeholder] nodes and re-renders dynamic content.
+    var lang = (pywebview.state && pywebview.state.language) || currentLang;
+    applyLanguage(lang);
 
     // Plan 08-04 (D-01/D-02): first-run welcome dialog — shown only when no
     // key is found anywhere (WCM nor DPAPI file). Checked once at startup.

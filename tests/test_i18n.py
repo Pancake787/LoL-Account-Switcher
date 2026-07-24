@@ -8,7 +8,9 @@ real Windows display language.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import re
 import sys
 import tempfile
 import types
@@ -501,6 +503,49 @@ class TestControllerEmittedKeyParity(unittest.TestCase):
         for key in self._EMITTED_KEYS:
             self.assertIn(key, i18n._STRINGS.get("de", {}), f"{key} missing from de catalog")
             self.assertIn(key, i18n._STRINGS.get("en", {}), f"{key} missing from en catalog")
+
+
+class TestFrontendKeysExistInCatalog(unittest.TestCase):
+    """Every i18n key referenced by the frontend (index.html data-i18n attrs and
+    app.js t('...') calls) MUST exist in both catalogs.
+
+    Regression guard for the Phase-8 bug where index.html referenced
+    `settings.*`/`ui.*` data-i18n keys and app.js used `t('card.active')`/
+    `t('card.switch')` that were either missing from strings.json or hardcoded
+    as German literals — surfacing as raw keys / untranslated text in the live
+    WebView. The prior parity test only checked controller.py-emitted keys, so
+    the frontend gap slipped through.
+    """
+
+    _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _HTML = os.path.join(_ROOT, "gui", "assets", "index.html")
+    _JS = os.path.join(_ROOT, "gui", "assets", "app.js")
+
+    def _catalogs(self):
+        i18n.reload()
+        return i18n._STRINGS.get("de", {}), i18n._STRINGS.get("en", {})
+
+    def test_html_data_i18n_keys_present_in_both_languages(self) -> None:
+        with open(self._HTML, encoding="utf-8") as fh:
+            html = fh.read()
+        keys = set(re.findall(r'data-i18n(?:-placeholder)?="([^"]+)"', html))
+        self.assertTrue(keys, "no data-i18n attributes found — test wiring broken")
+        de, en = self._catalogs()
+        for key in sorted(keys):
+            self.assertIn(key, de, f"index.html data-i18n '{key}' missing from de catalog")
+            self.assertIn(key, en, f"index.html data-i18n '{key}' missing from en catalog")
+
+    def test_appjs_t_call_keys_present_in_both_languages(self) -> None:
+        with open(self._JS, encoding="utf-8") as fh:
+            js = fh.read()
+        # Match t('literal') / t("literal") with a dotted key; dynamic t(var) calls
+        # (no string literal) are skipped — only static keys are checkable.
+        keys = set(re.findall(r"""\bt\(\s*['"]([a-z0-9_]+(?:\.[a-z0-9_]+)+)['"]""", js))
+        self.assertTrue(keys, "no static t('...') calls found — test wiring broken")
+        de, en = self._catalogs()
+        for key in sorted(keys):
+            self.assertIn(key, de, f"app.js t('{key}') missing from de catalog")
+            self.assertIn(key, en, f"app.js t('{key}') missing from en catalog")
 
 
 if __name__ == "__main__":
