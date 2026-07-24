@@ -10,6 +10,8 @@
     "status.snapshot_saved": "Snapshot gespeichert. Zukünftig ein-Klick-Wechsel möglich.",
     "status.no_login_yet": "Noch kein Login erkannt — bitte zuerst im Riot-Client einloggen, dann erneut klicken.",
     "status.done_active": "Fertig — {name} ist aktiv.",
+    "status.idle_active": "Bereit — {name} ist aktiv.",
+    "status.idle": "Bereit.",
     "status.pending_login": "Im Riot-Client als \"{name}\" einloggen (mit \"Angemeldet bleiben\") — der Login-Bildschirm erscheint automatisch. Danach auf \"Login fertig — Snapshot speichern\" klicken.",
     "status.recapture_blocked": "Nicht möglich: League of Legends läuft gerade.",
     "status.recapture_resetting": "Sitzung wird zurückgesetzt…",
@@ -72,6 +74,10 @@
     "card.session_warning": "Session evtl. abgelaufen",
     "card.no_api_key_title": "API-Key in den Einstellungen hinterlegen",
     "card.drag_title": "Verschieben",
+    "card.copy_title": "Passwort kopieren",
+    "card.rename_title": "Umbenennen",
+    "card.recapture_title": "Session neu aufnehmen",
+    "card.delete_title": "Löschen",
 
     "toast.password_copied": "Passwort kopiert — wird in 30s gelöscht",
     "toast.no_password_stored": "Kein Passwort gespeichert",
@@ -107,6 +113,7 @@
     "ui.rename_title": "Account umbenennen",
     "ui.new_display_name_label": "Neuer Anzeigename",
     "ui.edit_riot_id_title": "Riot-ID bearbeiten",
+    "ui.api_key_expired": "API-Key abgelaufen — Settings",
     "ui.confirm_delete_title": "Account wirklich löschen?",
     "ui.delete_permanently": "Endgültig löschen"
   },
@@ -121,6 +128,8 @@
     "status.snapshot_saved": "Snapshot saved. One-click switching is now available.",
     "status.no_login_yet": "No login detected yet — please log in via the Riot Client first, then click again.",
     "status.done_active": "Done — {name} is now active.",
+    "status.idle_active": "Ready — {name} is active.",
+    "status.idle": "Ready.",
     "status.pending_login": "Log in to the Riot Client as \"{name}\" (with \"Stay signed in\") — the login screen appears automatically. Then click \"Login done — save snapshot\".",
     "status.recapture_blocked": "Not possible: League of Legends is currently running.",
     "status.recapture_resetting": "Resetting session…",
@@ -183,6 +192,10 @@
     "card.session_warning": "Session may have expired",
     "card.no_api_key_title": "Set your API key in Settings",
     "card.drag_title": "Drag to reorder",
+    "card.copy_title": "Copy password",
+    "card.rename_title": "Rename",
+    "card.recapture_title": "Recapture session",
+    "card.delete_title": "Delete",
 
     "toast.password_copied": "Password copied — will be cleared in 30s",
     "toast.no_password_stored": "No password stored",
@@ -218,6 +231,7 @@
     "ui.rename_title": "Rename account",
     "ui.new_display_name_label": "New display name",
     "ui.edit_riot_id_title": "Edit Riot ID",
+    "ui.api_key_expired": "API key expired — Settings",
     "ui.confirm_delete_title": "Really delete account?",
     "ui.delete_permanently": "Delete permanently"
   }

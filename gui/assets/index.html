@@ -437,7 +437,7 @@
         <div>
           <h1 data-i18n="ui.app_title">Accounts</h1>
           <div class="sub" id="subline">Lade&hellip;</div>
-          <span class="api-key-warning-hint" id="api-key-warning-hint">API-Key abgelaufen &mdash; Settings</span>
+          <span class="api-key-warning-hint" id="api-key-warning-hint" data-i18n="ui.api_key_expired">API-Key abgelaufen &mdash; Settings</span>
         </div>
         <div class="head-controls">
           <span class="client-status offline" id="client-status"><span class="dot" aria-hidden="true"></span>Offline</span>
@@ -464,10 +464,10 @@
 
   <div class="statusbar" id="statusbar" data-status="idle">
     <span class="dot" aria-hidden="true"></span>
-    <span id="status-text">Lade&hellip;</span>
-    <button class="status-action confirm" id="btn-confirm-login" onclick="confirmLogin()">Login fertig</button>
-    <button class="status-action cancel" id="btn-cancel-login" onclick="cancelLogin()">Abbrechen</button>
-    <button class="status-action retry" id="btn-retry" onclick="retrySwitch()">Erneut versuchen</button>
+    <span id="status-text" data-i18n="ui.loading">Lade&hellip;</span>
+    <button class="status-action confirm" id="btn-confirm-login" onclick="confirmLogin()" data-i18n="ui.login_done">Login fertig</button>
+    <button class="status-action cancel" id="btn-cancel-login" onclick="cancelLogin()" data-i18n="ui.cancel">Abbrechen</button>
+    <button class="status-action retry" id="btn-retry" onclick="retrySwitch()" data-i18n="ui.retry">Erneut versuchen</button>
   </div>
 </div>
 

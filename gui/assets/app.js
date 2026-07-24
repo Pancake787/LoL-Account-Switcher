@@ -279,8 +279,8 @@ function renderStatusBar(state) {
       textEl.textContent = statusMessage;
     } else if (barState === 'idle') {
       textEl.textContent = activeName
-        ? `Bereit — ${activeName} ist aktiv.`
-        : 'Bereit.';
+        ? t('status.idle_active', { name: activeName })
+        : t('status.idle');
     } else {
       textEl.textContent = '';
     }
@@ -429,7 +429,7 @@ function rankRow(rankData, queueLabel, stale, noApiKey) {
   }
 
   // The rank tile is clickable to open the Riot-ID edit modal (v1.0 RiotIdDialog affordance)
-  return `<div class="rank editable${staleClass}" title="Riot-ID bearbeiten">
+  return `<div class="rank editable${staleClass}" title="${esc(t('ui.edit_riot_id_title'))}">
     ${emblemOrGem(key, color)}
     <div class="info">
       <div class="queue">${esc(queueLabel)}</div>
@@ -504,10 +504,10 @@ function card(acc, activeUsername, switching, noApiKey) {
       </div>
       <div class="actions">
         ${switchBtn}
-        <button class="act"${disabled} title="Passwort kopieren" aria-label="Passwort kopieren" data-copy="${esc(acc.username)}">${ICON.copy}</button>
-        <button class="act"${disabled} title="Umbenennen" aria-label="Umbenennen" data-rename="${esc(acc.username)}">${ICON.edit}</button>
-        <button class="act"${disabled} title="Session neu aufnehmen" aria-label="Session neu aufnehmen" data-recapture="${esc(acc.username)}">${ICON.recapture}</button>
-        <button class="act del"${disabled} title="Löschen" aria-label="Löschen" data-delete="${esc(acc.username)}">${ICON.trash}</button>
+        <button class="act"${disabled} title="${esc(t('card.copy_title'))}" aria-label="${esc(t('card.copy_title'))}" data-copy="${esc(acc.username)}">${ICON.copy}</button>
+        <button class="act"${disabled} title="${esc(t('card.rename_title'))}" aria-label="${esc(t('card.rename_title'))}" data-rename="${esc(acc.username)}">${ICON.edit}</button>
+        <button class="act"${disabled} title="${esc(t('card.recapture_title'))}" aria-label="${esc(t('card.recapture_title'))}" data-recapture="${esc(acc.username)}">${ICON.recapture}</button>
+        <button class="act del"${disabled} title="${esc(t('card.delete_title'))}" aria-label="${esc(t('card.delete_title'))}" data-delete="${esc(acc.username)}">${ICON.trash}</button>
       </div>
     </div>
     ${ranksBlock}
