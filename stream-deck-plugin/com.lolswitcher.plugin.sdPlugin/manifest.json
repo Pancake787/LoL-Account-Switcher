@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "UUID": "com.lolswitcher.plugin",
+  "Name": "LoL Account Switcher",
+  "Category": "LoL Account Switcher",
+  "CategoryIcon": "imgs/plugin/icon",
+  "Author": "Maik",
+  "Description": "Account-Wechsel per Stream Deck-Taste",
+  "Version": "1.0.0.0",
+  "SDKVersion": 2,
+  "CodePath": "bin/plugin.js",
+  "Icon": "imgs/plugin/icon",
+  "Software": {
+    "MinimumVersion": "7.1"
+  },
+  "Nodejs": {
+    "Version": "24"
+  },
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Actions": [
+    {
+      "UUID": "com.lolswitcher.plugin.switch-account",
+      "Name": "Account wechseln",
+      "Icon": "imgs/actions/switch-inactive",
+      "PropertyInspectorPath": "ui/switch-action.html",
+      "DisableAutomaticStates": true,
+      "States": [
+        {
+          "Image": "imgs/actions/switch-inactive",
+          "Title": "Inaktiv"
+        },
+        {
+          "Image": "imgs/actions/switch-active",
+          "Title": "Aktiv"
+        }
+      ]
+    }
+  ]
+}

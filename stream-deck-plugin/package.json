@@ -1,0 +1,24 @@
+{
+  "name": "com.lolswitcher.plugin",
+  "version": "1.0.0",
+  "description": "LoL Account Switcher Stream Deck Plugin",
+  "main": "bin/plugin.js",
+  "scripts": {
+    "build": "rollup -c rollup.config.mjs",
+    "watch": "rollup -c rollup.config.mjs --watch",
+    "pack": "npm run build && streamdeck pack com.lolswitcher.plugin.sdPlugin"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "2.1.0"
+  },
+  "devDependencies": {
+    "@elgato/cli": "1.7.4",
+    "@rollup/plugin-commonjs": "^29.0.3",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-typescript": "^11.0.0",
+    "@types/node": "^25.9.2",
+    "rollup": "^4.0.0",
+    "tslib": "^2.6.0",
+    "typescript": "^5.0.0"
+  }
+}

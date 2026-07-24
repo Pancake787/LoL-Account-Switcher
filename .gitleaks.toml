@@ -1,0 +1,7 @@
+title = "LoL Account Switcher gitleaks config"
+
+# No known false positives yet — start empty and add allowlist entries
+# only when a specific verified-safe match is found during REL-04 scanning.
+[[allowlists]]
+description = "Example/fixture data explicitly marked as test doubles"
+regexes = ['''EXAMPLE_[A-Z0-9]{16}''']

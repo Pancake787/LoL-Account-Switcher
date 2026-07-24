@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec.bak
+
+# OS / editor
+Thumbs.db
+.DS_Store
+
+# Temp / diagnostics
+sd-debug.log
+test_exec.cjs
+
+# Secrets — Riot API key (DPAPI-encrypted file lives in %APPDATA%, never in repo)
+riot_api_key.dat
+riot_api_key.txt
+*.key
+
+# --- Secret-safety: Riot session YAMLs must never be committed ---
+# RiotGamesPrivateSettings.yaml contains an RSO auth token (CLAUDE.md).
+# Blanket-ignore all YAML; explicitly allow known-legitimate config files below.
+*.yaml
+*.yml
+!.pre-commit-config.yaml
+
+# App data that must never be committed
+accounts.json
+sessions/
+
+# Test fixture safety net (tests already use tmp_path/tempfile — this is defense-in-depth)
+test_fixtures/
+*.session.yaml
