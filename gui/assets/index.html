@@ -114,6 +114,12 @@
   .head{display:flex;align-items:center;justify-content:space-between;padding:22px 26px 14px}
   .head h1{font-family:var(--font-disp);font-weight:700;font-size:22px;letter-spacing:.02em}
   .head .sub{font-size:12px;color:var(--text-3);margin-top:3px;text-transform:uppercase;letter-spacing:.13em}
+  /* Plan 08-04 (D-09): persistent header hint on 401/403 key expiry — hidden by default */
+  .api-key-warning-hint{
+    display:none;margin-top:6px;font-size:11.5px;color:var(--wr-bad);cursor:pointer;
+    text-decoration:underline;text-underline-offset:2px;
+  }
+  .api-key-warning-hint.visible{display:inline-block}
   .icon-btn{
     width:36px;height:36px;border-radius:10px;border:1px solid var(--border);
     background:var(--surface);color:var(--text-2);cursor:pointer;
@@ -378,6 +384,9 @@
   /* rank row is clickable for riot-id edit */
   .rank.editable{cursor:pointer}
   .rank.editable:hover{background:var(--surface-hover);border-color:var(--border-strong)}
+  /* Plan 08-04 (D-01): dezent "Kein API-Key" rank-tile hint — opens Settings on click */
+  .rank.no-api-key{cursor:pointer;opacity:.7}
+  .rank.no-api-key:hover{background:var(--surface-hover);border-color:var(--border-strong);opacity:.9}
 
   /* ---- App-driven resize grips (D-10: frameless window, no OS resize border) ---- */
   /* Grips sit on top of content (z-index:10) but never carry pywebview-drag-region. */
@@ -419,6 +428,7 @@
         <div>
           <h1>Accounts</h1>
           <div class="sub" id="subline">Lade&hellip;</div>
+          <span class="api-key-warning-hint" id="api-key-warning-hint">API-Key abgelaufen &mdash; Settings</span>
         </div>
         <div class="head-controls">
           <span class="client-status offline" id="client-status"><span class="dot" aria-hidden="true"></span>Offline</span>

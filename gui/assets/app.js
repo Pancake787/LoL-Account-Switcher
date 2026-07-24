@@ -298,9 +298,23 @@ function initSortable(listEl) {
  *   Rank cache entry for one queue; `{}` means Unranked (D-07).
  * @param {string} queueLabel Human-readable queue label (e.g. "Solo/Duo").
  * @param {boolean} [stale] Whether the rank data is stale (from rank_cache.stale flag).
+ * @param {boolean} [noApiKey] Plan 08-04 (D-01): when true, render a dezent
+ *   "Kein API-Key" hint instead of a normal rank tile; click opens Settings.
  * @returns {string} HTML string for a `.rank` element.
  */
-function rankRow(rankData, queueLabel, stale) {
+function rankRow(rankData, queueLabel, stale, noApiKey) {
+  // Plan 08-04 (D-01): no key stored anywhere — show a dezent hint tile
+  // instead of "Unranked", parallel to the empty-state branch below. Keeps
+  // the two-tile grid layout intact (still a `.rank` element).
+  if (noApiKey) {
+    return `<div class="rank no-api-key" data-open-settings="1" title="API-Key in den Einstellungen hinterlegen">
+      <div class="info">
+        <div class="queue">${esc(queueLabel)}</div>
+        <div class="tier">Kein API-Key</div>
+      </div>
+    </div>`;
+  }
+
   // Pitfall 1: real API tier strings are always UPPERCASE ('GOLD'); normalize
   // once here so both the color-map lookup and the emblem lookup agree.
   const key = (rankData.tier || 'UNRANKED').toUpperCase();
@@ -350,9 +364,11 @@ function rankRow(rankData, queueLabel, stale) {
  * @param {object} acc     Serialised account from window.state.accounts.
  * @param {string} activeUsername  The currently active Riot username.
  * @param {boolean} switching  True when a switch is in progress (disables buttons).
+ * @param {boolean} [noApiKey] Plan 08-04 (D-01): true when no API key is stored
+ *   anywhere — both rank tiles render the "Kein API-Key" hint instead.
  * @returns {string} HTML string for a `.card` element.
  */
-function card(acc, activeUsername, switching) {
+function card(acc, activeUsername, switching, noApiKey) {
   const isActive = acc.username === activeUsername;
   const disabled = switching ? ' disabled' : '';
 
@@ -384,8 +400,8 @@ function card(acc, activeUsername, switching) {
   const soloData = rankCache.solo || {};
   const flexData = rankCache.flex || {};
   const ranksBlock = `<div class="ranks">`
-    + rankRow(soloData, 'Solo/Duo', isStale)
-    + rankRow(flexData, 'Flex', isStale)
+    + rankRow(soloData, 'Solo/Duo', isStale, noApiKey)
+    + rankRow(flexData, 'Flex', isStale, noApiKey)
     + `</div>`;
 
   return `<div class="card${isActive ? ' active' : ''}" data-username="${esc(acc.username)}">
@@ -420,9 +436,12 @@ function card(acc, activeUsername, switching) {
 function openModal(id) {
   const overlay = document.getElementById(id);
   if (!overlay) return;
-  // Clear error state from previous open
+  // Clear error/success feedback state from previous open (Plan 08-04:
+  // settings-modal carries both a .modal-error and a .modal-success).
   const errEl = overlay.querySelector('.modal-error');
   if (errEl) { errEl.textContent = ''; errEl.classList.remove('visible'); }
+  const successEl = overlay.querySelector('.modal-success');
+  if (successEl) { successEl.textContent = ''; successEl.classList.remove('visible'); }
   overlay.classList.add('open');
   // Focus first input
   const first = overlay.querySelector('input:not([type=hidden]),select');
@@ -446,10 +465,31 @@ function closeModal(id) {
 function showModalError(modalId, message) {
   const overlay = document.getElementById(modalId);
   if (!overlay) return;
+  // Plan 08-04: hide any lingering success feedback when an error is shown.
+  const successEl = overlay.querySelector('.modal-success');
+  if (successEl) { successEl.textContent = ''; successEl.classList.remove('visible'); }
   const errEl = overlay.querySelector('.modal-error');
   if (!errEl) return;
   errEl.textContent = message;
   errEl.classList.add('visible');
+}
+
+/**
+ * Show an inline SUCCESS message inside a modal (Plan 08-04, D-03 live-key-validation
+ * feedback and Settings delete/change confirmations). Mirrors showModalError.
+ * @param {string} modalId  The modal overlay element ID.
+ * @param {string} message  The success text to display.
+ */
+function showModalSuccess(modalId, message) {
+  const overlay = document.getElementById(modalId);
+  if (!overlay) return;
+  // Hide any lingering error feedback when success is shown.
+  const errEl = overlay.querySelector('.modal-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.remove('visible'); }
+  const successEl = overlay.querySelector('.modal-success');
+  if (!successEl) return;
+  successEl.textContent = message;
+  successEl.classList.add('visible');
 }
 
 /* ---- Modal submit handlers ---- */
@@ -533,6 +573,119 @@ async function submitEditRiotId() {
   }
 }
 
+/* ---- Onboarding + Settings (Plan 08-04, ONBOARD-01/02) ---- */
+
+/**
+ * Populate the Settings modal fields from a get_settings() result.
+ * @param {object} settings  {has_api_key, api_key_masked, language, update_check_enabled, disable_gpu}
+ */
+function populateSettingsModal(settings) {
+  const keyField = document.getElementById('settings-api-key');
+  if (keyField) keyField.value = settings.api_key_masked || '';
+  const keyInput = document.getElementById('settings-api-key-input');
+  if (keyInput) keyInput.value = '';
+  const langSelect = document.getElementById('settings-language');
+  if (langSelect && settings.language) langSelect.value = settings.language;
+  const updateCheck = document.getElementById('settings-update-check');
+  if (updateCheck) updateCheck.checked = settings.update_check_enabled !== false;
+  // D-07: the GPU toggle shows "acceleration enabled", i.e. NOT disable_gpu.
+  const gpuToggle = document.getElementById('settings-gpu');
+  if (gpuToggle) gpuToggle.checked = !settings.disable_gpu;
+}
+
+/**
+ * Open the Settings modal, pre-filled with the current settings (D-05/D-06).
+ */
+async function openSettings() {
+  if (!window.pywebview || !pywebview.api) return;
+  try {
+    const settings = await pywebview.api.get_settings();
+    populateSettingsModal(settings);
+    openModal('settings-modal');
+  } catch (err) {
+    console.error('[app.js] get_settings error', err);
+  }
+}
+
+/**
+ * Submit a "save API key" form — shared by both the Settings modal and the
+ * welcome dialog (D-03 live validation, same ok-dict shape as other modals).
+ * On success: the Settings path shows inline success feedback + refreshes the
+ * masked field; the welcome path closes and does NOT reopen (D-01/D-02).
+ * @param {string} modalId  'settings-modal' or 'welcome-modal'.
+ */
+async function submitSaveApiKey(modalId) {
+  const inputId = modalId === 'welcome-modal' ? 'welcome-api-key' : 'settings-api-key-input';
+  const input = document.getElementById(inputId);
+  const key = input ? input.value.trim() : '';
+
+  if (!key) {
+    showModalError(modalId, 'Bitte einen API-Key eingeben.');
+    return;
+  }
+
+  try {
+    const result = await pywebview.api.save_api_key(key);
+    if (result.ok === false) {
+      showModalError(modalId, result.error || 'Unbekannter Fehler');
+      return;
+    }
+    if (input) input.value = '';
+    if (modalId === 'welcome-modal') {
+      closeModal('welcome-modal');
+    } else {
+      showModalSuccess(modalId, 'API-Key gespeichert.');
+      const masked = await pywebview.api.get_api_key_masked();
+      const keyField = document.getElementById('settings-api-key');
+      if (keyField) keyField.value = masked;
+    }
+  } catch (err) {
+    showModalError(modalId, String(err));
+  }
+}
+
+/**
+ * Delete the stored API key (Settings modal "Löschen" button) and refresh
+ * the masked-key display in place.
+ */
+async function deleteApiKey() {
+  if (!window.pywebview || !pywebview.api) return;
+  try {
+    await pywebview.api.delete_api_key();
+    const masked = await pywebview.api.get_api_key_masked();
+    const keyField = document.getElementById('settings-api-key');
+    if (keyField) keyField.value = masked;
+    showModalSuccess('settings-modal', 'API-Key gelöscht.');
+  } catch (err) {
+    showModalError('settings-modal', String(err));
+  }
+}
+
+/**
+ * First-run trigger (D-01/D-02): if get_settings() reports no stored key
+ * anywhere (WCM nor DPAPI file), show the skippable welcome dialog. Called
+ * once from the pywebviewready handler, after the initial state push.
+ */
+async function maybeShowWelcome() {
+  if (!window.pywebview || !pywebview.api) return;
+  try {
+    const settings = await pywebview.api.get_settings();
+    if (settings.has_api_key === false) {
+      openModal('welcome-modal');
+    }
+  } catch (err) {
+    console.error('[app.js] maybeShowWelcome error', err);
+  }
+}
+
+/**
+ * Skip the welcome dialog ("Später" button) — switching still works fully
+ * without a key (D-01).
+ */
+function skipWelcome() {
+  closeModal('welcome-modal');
+}
+
 /**
  * Execute account deletion after the confirm-delete modal was confirmed.
  * Calls pywebview.api.delete_account, then closes the modal.
@@ -551,8 +704,10 @@ async function confirmDelete() {
 /* ---- Global modal keyboard / overlay-click handler ---- */
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
-  // Close the topmost open non-destructive modal (add / rename / edit-riot-id)
-  ['add-account-modal', 'rename-modal', 'edit-riot-id-modal'].forEach(id => {
+  // Close the topmost open non-destructive modal (add / rename / edit-riot-id /
+  // settings / welcome — Plan 08-04 extends this list with the two new modals,
+  // both skippable/dismissable, not destructive)
+  ['add-account-modal', 'rename-modal', 'edit-riot-id-modal', 'settings-modal', 'welcome-modal'].forEach(id => {
     const el = document.getElementById(id);
     if (el && el.classList.contains('open')) el.classList.remove('open');
   });
@@ -560,7 +715,7 @@ document.addEventListener('keydown', function (e) {
 });
 
 // Overlay-click-to-close for non-destructive modals (click the backdrop, not the dialog box)
-['add-account-modal', 'rename-modal', 'edit-riot-id-modal'].forEach(id => {
+['add-account-modal', 'rename-modal', 'edit-riot-id-modal', 'settings-modal', 'welcome-modal'].forEach(id => {
   const overlay = document.getElementById(id);
   if (!overlay) return;
   overlay.addEventListener('click', function (e) {
@@ -582,6 +737,43 @@ document.addEventListener('keydown', function (e) {
   const confirmDeleteSubmit = document.getElementById('confirm-delete-submit');
   if (confirmDeleteSubmit) confirmDeleteSubmit.addEventListener('click', confirmDelete);
 
+  // Plan 08-04: Settings modal (gear button, save/delete key, GPU toggle)
+  const settingsBtn = document.getElementById('settingsBtn');
+  if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
+
+  const settingsKeySave = document.getElementById('settings-key-save');
+  if (settingsKeySave) settingsKeySave.addEventListener('click', () => submitSaveApiKey('settings-modal'));
+
+  const settingsKeyDelete = document.getElementById('settings-key-delete');
+  if (settingsKeyDelete) settingsKeyDelete.addEventListener('click', deleteApiKey);
+
+  const settingsGpu = document.getElementById('settings-gpu');
+  if (settingsGpu) {
+    settingsGpu.addEventListener('change', () => {
+      pywebview.api.set_gpu(settingsGpu.checked)
+        .catch(err => console.error('[app.js] set_gpu error', err));
+    });
+  }
+
+  // Plan 08-04: Welcome dialog (Speichern / Später / dev-portal link)
+  const welcomeSubmit = document.getElementById('welcome-submit');
+  if (welcomeSubmit) welcomeSubmit.addEventListener('click', () => submitSaveApiKey('welcome-modal'));
+
+  const welcomeSkip = document.getElementById('welcome-skip');
+  if (welcomeSkip) welcomeSkip.addEventListener('click', skipWelcome);
+
+  const welcomeDevLink = document.getElementById('welcome-dev-link');
+  if (welcomeDevLink) {
+    welcomeDevLink.addEventListener('click', () => {
+      pywebview.api.open_external_url('https://developer.riotgames.com/')
+        .catch(err => console.error('[app.js] open_external_url error', err));
+    });
+  }
+
+  // Plan 08-04: header expiry hint (D-09) opens Settings on click
+  const apiKeyWarningHint = document.getElementById('api-key-warning-hint');
+  if (apiKeyWarningHint) apiKeyWarningHint.addEventListener('click', openSettings);
+
   // Enter key on modal input fields triggers the primary action
   document.getElementById('add-display-name').addEventListener('keydown', e => { if (e.key === 'Enter') submitAddAccount(); });
   document.getElementById('add-username').addEventListener('keydown', e => { if (e.key === 'Enter') submitAddAccount(); });
@@ -589,6 +781,10 @@ document.addEventListener('keydown', function (e) {
   document.getElementById('add-riot-id').addEventListener('keydown', e => { if (e.key === 'Enter') submitAddAccount(); });
   document.getElementById('rename-display-name').addEventListener('keydown', e => { if (e.key === 'Enter') submitRename(); });
   document.getElementById('edit-riot-id').addEventListener('keydown', e => { if (e.key === 'Enter') submitEditRiotId(); });
+  const settingsKeyInput = document.getElementById('settings-api-key-input');
+  if (settingsKeyInput) settingsKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitSaveApiKey('settings-modal'); });
+  const welcomeKeyInput = document.getElementById('welcome-api-key');
+  if (welcomeKeyInput) welcomeKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitSaveApiKey('welcome-modal'); });
 })();
 
 /* ---- Render functions ---- */
@@ -600,8 +796,10 @@ document.addEventListener('keydown', function (e) {
  * @param {object[]} accounts       Serialised account array.
  * @param {string|null} activeUsername  Active Riot username or null.
  * @param {string} status           Switch status: 'idle' | 'switching' | 'error'.
+ * @param {boolean} [noApiKey] Plan 08-04 (D-01): true when no API key is stored
+ *   anywhere — rank tiles render the "Kein API-Key" hint instead of rank data.
  */
-function renderAccountList(accounts, activeUsername, status) {
+function renderAccountList(accounts, activeUsername, status, noApiKey) {
   const listEl = document.getElementById('list');
   if (!listEl) return;
 
@@ -612,7 +810,15 @@ function renderAccountList(accounts, activeUsername, status) {
     return;
   }
 
-  listEl.innerHTML = accounts.map(acc => card(acc, activeUsername, switching)).join('');
+  listEl.innerHTML = accounts.map(acc => card(acc, activeUsername, switching, noApiKey)).join('');
+
+  // Wire "Kein API-Key" rank-tile hint clicks — opens Settings (D-01)
+  listEl.querySelectorAll('[data-open-settings]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openSettings();
+    });
+  });
 
   // Wire switch buttons
   listEl.querySelectorAll('[data-switch]').forEach(btn => {
@@ -761,16 +967,31 @@ function render(state) {
   const accounts = state.accounts || [];
   const activeUsername = state.active_username || null;
   const status = state.status || 'idle';
+  // Plan 08-04 (D-01): no key stored anywhere -> "Kein API-Key" rank-tile hint.
+  const noApiKey = state.has_api_key === false;
 
-  renderAccountList(accounts, activeUsername, status);
+  renderAccountList(accounts, activeUsername, status, noApiKey);
   renderStatusBar(state);           // full state machine (D-01..D-04) — Plan 04-04
   renderClientStatus(state);        // header live-status indicator (STATUS-01) — Plan 05-02
   renderSubline(accounts, activeUsername);
+  renderApiKeyWarningHint(state);   // Plan 08-04 (D-09): persistent 401/403 header hint
   // D-03: lock all switch/CRUD controls while a switch or first-login is in progress
   setUiLocked(status === 'switching');
   // D-17: clear refresh spinner on each state update (rank data may have changed)
   const refreshBtn = document.getElementById('refreshBtn');
   if (refreshBtn) refreshBtn.classList.remove('refreshing');
+}
+
+/**
+ * Render the persistent header hint shown when a rank fetch hit 401/403
+ * (Plan 08-04, D-09). Driven solely by state.api_key_warning; clicking it
+ * opens the Settings modal.
+ * @param {object} state  Full pywebview.state.
+ */
+function renderApiKeyWarningHint(state) {
+  const el = document.getElementById('api-key-warning-hint');
+  if (!el) return;
+  el.classList.toggle('visible', state.api_key_warning === true);
 }
 
 /* ---- Copy-password handler (D-19/D-20) ---- */
@@ -986,4 +1207,8 @@ window.addEventListener('pywebviewready', function () {
 
   // Initial render from the state that on_webview_ready() just pushed
   render(pywebview.state);
+
+  // Plan 08-04 (D-01/D-02): first-run welcome dialog — shown only when no
+  // key is found anywhere (WCM nor DPAPI file). Checked once at startup.
+  maybeShowWelcome();
 });
