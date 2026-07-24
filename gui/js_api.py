@@ -16,10 +16,18 @@ Two-phase initialisation pattern (same as v1.0 ``MainWindow.set_controller``):
 """
 from __future__ import annotations
 
+import webbrowser
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from controller import Controller  # noqa: F401 — type hints only
+
+#: Plan 08-04 (T-08-13): fixed host allowlist for open_external_url — only
+#: https URLs to these two hosts may ever be opened in the default browser.
+_EXTERNAL_URL_HOST_ALLOWLIST: frozenset[str] = frozenset(
+    {"developer.riotgames.com", "github.com"}
+)
 
 
 class JsApi:
@@ -234,6 +242,93 @@ class JsApi:
             return {"ok": True}
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Plan 08-04 — Onboarding + Settings (ONBOARD-01/02)
+    # ------------------------------------------------------------------
+
+    def save_api_key(self, key: str) -> dict:
+        """Save a candidate Riot API key after live validation (D-03/D-08).
+
+        Thin ok-dict wrapper — all validation/persistence/refresh logic lives
+        in ``controller.save_api_key``; this method never inspects or logs the
+        key value (T-04-05 bridge guard).
+
+        Args:
+            key: The personal Riot API key entered by the user.
+
+        Returns:
+            ``{"ok": True}`` or ``{"ok": False, "error": "<message>"}``.
+        """
+        try:
+            self._controller.save_api_key(key)
+            return {"ok": True}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_api_key_masked(self) -> str:
+        """Return the fixed 8-bullet key mask, or '' if no key is stored.
+
+        Returns:
+            str: The masked key display value — never the raw key (T-08-11).
+        """
+        return self._controller.get_api_key_masked()
+
+    def delete_api_key(self) -> dict:
+        """Delete the stored Riot API key (WCM + DPAPI file).
+
+        Returns:
+            ``{"ok": True}`` — delete_api_key is idempotent and never raises.
+        """
+        self._controller.delete_api_key()
+        return {"ok": True}
+
+    def set_gpu(self, enabled: bool) -> None:
+        """Persist the GPU-acceleration toggle (D-07 — effective after restart).
+
+        Args:
+            enabled: True to enable GPU acceleration.
+        """
+        self._controller.set_gpu(enabled)
+
+    def get_settings(self) -> dict:
+        """Return the current app-wide settings for the Settings modal.
+
+        Returns:
+            dict: See ``controller.get_settings`` — never includes the raw key.
+        """
+        return self._controller.get_settings()
+
+    def open_external_url(self, url: str) -> dict:
+        """Open a URL in the default browser, gated by an https + host allowlist.
+
+        T-08-13: only ``https://`` URLs whose host is exactly
+        ``developer.riotgames.com`` or ``github.com`` (or a subdomain thereof)
+        are ever passed to ``webbrowser.open``; anything else is rejected
+        without side effects. This is the ONLY validation this bridge method
+        performs (T-04-05 — no other business logic).
+
+        Args:
+            url: The candidate URL to open.
+
+        Returns:
+            ``{"ok": True}`` if the URL was opened, ``{"ok": False}`` otherwise.
+        """
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            return {"ok": False}
+        if parts.scheme != "https" or not parts.hostname:
+            return {"ok": False}
+        host = parts.hostname.lower()
+        allowed = host in _EXTERNAL_URL_HOST_ALLOWLIST or any(
+            host.endswith(f".{allowed_host}")
+            for allowed_host in _EXTERNAL_URL_HOST_ALLOWLIST
+        )
+        if not allowed:
+            return {"ok": False}
+        webbrowser.open(url, new=2)
+        return {"ok": True}
 
     def on_webview_ready(self) -> None:
         """Called from the JS ``pywebviewready`` handler via ``setTimeout(..., 0)``.

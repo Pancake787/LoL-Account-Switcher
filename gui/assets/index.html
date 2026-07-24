@@ -338,6 +338,22 @@
     border-radius:8px;padding:8px 11px;
   }
   .modal-error.visible{display:block}
+  /* Plan 08-04: success-feedback variant mirroring .modal-error (D-03 live-validation feedback) */
+  .modal-success{
+    font-size:12.5px;color:var(--wr-good);margin-bottom:12px;min-height:0;
+    display:none;background:rgba(54,211,153,.08);border:1px solid rgba(54,211,153,.25);
+    border-radius:8px;padding:8px 11px;
+  }
+  .modal-success.visible{display:block}
+  /* Plan 08-04: settings modal toggle row (update-check / GPU) */
+  .modal-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .modal-toggle-row .modal-toggle-label{font-size:13.5px;color:var(--text)}
+  .modal-toggle-row input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
+  /* Plan 08-04: welcome dialog 3-step guide */
+  .welcome-steps{font-size:13.5px;color:var(--text-2);line-height:1.6;margin:0 0 16px;padding-left:20px}
+  .welcome-steps li{margin-bottom:4px}
+  .welcome-steps a{color:var(--accent);text-decoration:none;cursor:pointer}
+  .welcome-steps a:hover{text-decoration:underline}
   .modal-actions{display:flex;gap:10px;margin-top:6px}
   .modal-actions .btn-primary{
     flex:1;height:38px;border-radius:9px;border:none;cursor:pointer;
@@ -408,6 +424,9 @@
           <span class="client-status offline" id="client-status"><span class="dot" aria-hidden="true"></span>Offline</span>
           <button class="icon-btn" id="refreshBtn" title="Aktualisieren" aria-label="Aktualisieren">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+          </button>
+          <button class="icon-btn" id="settingsBtn" title="Einstellungen" aria-label="Einstellungen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </button>
         </div>
       </div>
@@ -555,6 +574,76 @@
     <div class="modal-actions">
       <button class="btn-danger" id="confirm-delete-submit">Endg&uuml;ltig l&ouml;schen</button>
       <button class="btn-secondary" onclick="closeModal('confirm-delete-modal')">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Einstellungen (D-05/D-06/D-07) -->
+<div class="modal-overlay" id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+  <div class="modal">
+    <h2 id="settings-modal-title">Einstellungen</h2>
+
+    <!-- (1) API-Key: maskierte Anzeige, &auml;ndern/l&ouml;schen, Live-Validierung -->
+    <div class="modal-field">
+      <label for="settings-api-key">Riot API-Key</label>
+      <input type="text" id="settings-api-key" placeholder="Kein Key hinterlegt" readonly autocomplete="off">
+      <input type="password" id="settings-api-key-input" placeholder="Neuen Key eingeben" autocomplete="off" style="margin-top:8px">
+    </div>
+    <div class="modal-success" id="settings-key-feedback-success"></div>
+    <div class="modal-error" id="settings-key-feedback"></div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="settings-key-save">&Auml;ndern</button>
+      <button class="btn-secondary" id="settings-key-delete">L&ouml;schen</button>
+    </div>
+
+    <!-- (2) Sprache DE/EN -->
+    <div class="modal-field" style="margin-top:18px">
+      <label for="settings-language">Sprache</label>
+      <select id="settings-language">
+        <option value="de">Deutsch</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+
+    <!-- (3) Update-Check an/aus -->
+    <div class="modal-field modal-toggle-row">
+      <span class="modal-toggle-label">Auf Updates pr&uuml;fen</span>
+      <input type="checkbox" id="settings-update-check">
+    </div>
+
+    <!-- (4) GPU-Beschleunigung -->
+    <div class="modal-field modal-toggle-row">
+      <span class="modal-toggle-label">GPU-Beschleunigung <span style="color:var(--text-3);font-weight:400">(kann HDR-Dark-Screen verursachen &mdash; wirksam nach Neustart)</span></span>
+      <input type="checkbox" id="settings-gpu">
+    </div>
+
+    <div class="modal-actions" style="margin-top:6px">
+      <button class="btn-secondary" onclick="closeModal('settings-modal')">Schlie&szlig;en</button>
+    </div>
+  </div>
+</div>
+
+<!-- Willkommen — Erststart-Onboarding (D-01..D-04) -->
+<div class="modal-overlay" id="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-modal-title">
+  <div class="modal">
+    <h2 id="welcome-modal-title">Willkommen!</h2>
+    <div class="modal-confirm-body">
+      Hinterlege deinen pers&ouml;nlichen Riot API-Key, damit Rang-Daten angezeigt werden k&ouml;nnen.
+      Das Wechseln zwischen Accounts funktioniert auch ohne Key.
+    </div>
+    <ol class="welcome-steps">
+      <li><a id="welcome-dev-link">developer.riotgames.com</a> &ouml;ffnen</li>
+      <li>Mit deinem Riot-Account einloggen</li>
+      <li>Den &bdquo;Personal API Key&ldquo; kopieren</li>
+    </ol>
+    <div class="modal-field">
+      <label for="welcome-api-key">Riot API-Key</label>
+      <input type="password" id="welcome-api-key" placeholder="RGAPI-..." autocomplete="off">
+    </div>
+    <div class="modal-error" id="welcome-error"></div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="welcome-submit">Speichern</button>
+      <button class="btn-secondary" id="welcome-skip">Sp&auml;ter</button>
     </div>
   </div>
 </div>

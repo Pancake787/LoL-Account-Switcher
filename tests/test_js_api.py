@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +275,146 @@ class TestSerializeAccountsRegionField(unittest.TestCase):
         result = ctrl._serialize_accounts()
         self.assertEqual(result[0]["region"], "EUW1")
         self.assertIn(result[0]["region"], rank_service.PLATFORM_TO_REGIONAL)
+
+
+# ---------------------------------------------------------------------------
+# Plan 08-04 Task 2 — Bridge methods: save_api_key, get_api_key_masked,
+# delete_api_key, set_gpu, get_settings, open_external_url.
+# ---------------------------------------------------------------------------
+
+class TestSaveApiKeyBridge(unittest.TestCase):
+    """JsApi.save_api_key wraps controller.save_api_key's ValueError as an ok-dict."""
+
+    def test_returns_ok_true_on_success(self) -> None:
+        from gui.js_api import JsApi
+        api = JsApi()
+        api._controller = MagicMock()
+        result = api.save_api_key("RGAPI-some-key")
+        self.assertEqual(result, {"ok": True})
+        api._controller.save_api_key.assert_called_once_with("RGAPI-some-key")
+
+    def test_returns_ok_false_with_error_on_value_error(self) -> None:
+        from gui.js_api import JsApi
+        api = JsApi()
+        api._controller = MagicMock()
+        api._controller.save_api_key.side_effect = ValueError("API-Key ungültig oder abgelaufen.")
+        result = api.save_api_key("RGAPI-bad-key")
+        self.assertEqual(result["ok"], False)
+        self.assertEqual(result["error"], "API-Key ungültig oder abgelaufen.")
+
+    def test_result_never_contains_key_value(self) -> None:
+        """Neither the ok=True nor the ok=False result dict ever echoes the key."""
+        from gui.js_api import JsApi
+        api = JsApi()
+        api._controller = MagicMock()
+        secret = "RGAPI-super-secret-abcdef"
+        result_ok = api.save_api_key(secret)
+        self.assertNotIn(secret, str(result_ok))
+
+        api._controller.save_api_key.side_effect = ValueError("ungültig")
+        result_err = api.save_api_key(secret)
+        self.assertNotIn(secret, str(result_err))
+
+
+class TestGetApiKeyMaskedBridge(unittest.TestCase):
+    def test_delegates_to_controller(self) -> None:
+        from gui.js_api import JsApi
+        api = JsApi()
+        api._controller = MagicMock()
+        api._controller.get_api_key_masked.return_value = "••••••••"
+        self.assertEqual(api.get_api_key_masked(), "••••••••")
+
+
+class TestDeleteApiKeyBridge(unittest.TestCase):
+    def test_delegates_and_returns_ok_true(self) -> None:
+        from gui.js_api import JsApi
+        api = JsApi()
+        api._controller = MagicMock()
+        result = api.delete_api_key()
+        api._controller.delete_api_key.assert_called_once_with()
+        self.assertEqual(result, {"ok": True})
+
+
+class TestSetGpuBridge(unittest.TestCase):
+    def test_delegates_to_controller(self) -> None:
+        from gui.js_api import JsApi
+        api = JsApi()
+        api._controller = MagicMock()
+        result = api.set_gpu(True)
+        api._controller.set_gpu.assert_called_once_with(True)
+        self.assertIsNone(result)
+
+
+class TestGetSettingsBridge(unittest.TestCase):
+    def test_delegates_to_controller(self) -> None:
+        from gui.js_api import JsApi
+        api = JsApi()
+        api._controller = MagicMock()
+        expected = {
+            "has_api_key": True,
+            "api_key_masked": "••••••••",
+            "language": "de",
+            "update_check_enabled": True,
+            "disable_gpu": True,
+        }
+        api._controller.get_settings.return_value = expected
+        self.assertEqual(api.get_settings(), expected)
+
+
+class TestOpenExternalUrlBridge(unittest.TestCase):
+    """T-08-13: https + host-allowlist gate — anything else is rejected."""
+
+    def test_rejects_http_scheme(self) -> None:
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("http://developer.riotgames.com/")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
+
+    def test_rejects_non_allowlisted_host(self) -> None:
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("https://evil.test/phish")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
+
+    def test_allows_developer_riotgames_com(self) -> None:
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("https://developer.riotgames.com/")
+            self.assertEqual(result, {"ok": True})
+            mock_browser.open.assert_called_once()
+
+    def test_allows_github_com(self) -> None:
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url(
+                "https://github.com/Pancake787/LoL-Account-Switcher/releases/latest"
+            )
+            self.assertEqual(result, {"ok": True})
+            mock_browser.open.assert_called_once()
+
+    def test_rejects_host_that_merely_contains_allowlisted_substring(self) -> None:
+        """A host like 'github.com.evil.test' must NOT match the allowlist
+        (naive substring/`endswith` traps — this checks true subdomain containment)."""
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("https://github.com.evil.test/x")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
+
+    def test_rejects_malformed_url(self) -> None:
+        from gui.js_api import JsApi
+        with patch("gui.js_api.webbrowser") as mock_browser:
+            api = JsApi()
+            result = api.open_external_url("not-a-url")
+            self.assertEqual(result, {"ok": False})
+            mock_browser.open.assert_not_called()
 
 
 if __name__ == "__main__":
